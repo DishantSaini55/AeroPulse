@@ -38,6 +38,6 @@ Invoke-RestMethod -Uri http://localhost:4000/api/v1/notes -Method Post -ContentT
 
 ## Architecture
 
-The current API lives in `apps/api`. `apps/web`, `packages/shared` and `infra` reserve space for later components. [Architecture notes](docs/architecture.md) describe the proposed domain model and design decisions. Planned technologies are introduced as the related features are implemented.
+The current API lives in `apps/api`. `apps/web`, `packages/shared` and `infra` reserve space for later components. Planned technologies will be introduced as the related features are implemented.
 
 All future equipment readings will be labelled simulated. Public aviation weather observations, when integrated, will be labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions.

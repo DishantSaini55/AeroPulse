@@ -1,0 +1,35 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Build output and test coverage
+dist/
+coverage/
+.vite/
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data and logs
+logs/
+*.log
+*.pid
+
+# Local infrastructure volumes
+.docker-data/
+postgres-data/
+redis-data/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Prisma generated artefacts are reproducible
+src/generated/prisma/

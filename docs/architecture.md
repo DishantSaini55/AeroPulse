@@ -25,7 +25,7 @@ flowchart LR
 
 The React application only renders data and requests authorised actions. The API owns business rules, permissions and database writes. This makes it impossible to bypass a disabled frontend button by calling an API directly. PostgreSQL holds the durable operational record; Socket.IO distributes fresh updates but is never the source of truth.
 
-The first implementation uses a single API process. Redis, BullMQ, multiple API instances and Nginx are intentionally deferred until the core workflow is tested. Adding distribution too early makes debugging a beginner project much harder.
+The first implementation uses a single API process. Redis, BullMQ, multiple API instances and Nginx are planned for a later resilience milestone, after the core workflow is tested.
 
 ## Planned domain modules
 
@@ -99,9 +99,3 @@ Historical demo records will be seeded with an explicit `DEMO` provenance label 
 - Use parameterised Prisma queries, rate limiting and security headers.
 - Store configuration in environment variables, with only variable names and safe values in `.env.example`.
 - Maintain structured, redacted logs and an audit trail for state-changing actions.
-
-## Beginner notes (Hinglish)
-
-**Frontend** browser mein UI dikhata hai. **Backend** rules apply karta hai, jaise “kya engineer alarm acknowledge kar sakta hai?”. **Database** permanent record rakhta hai. Browser REST request se data mangta hai; Socket.IO live update bhejta hai. Agar browser disconnect ho jaaye, reconnect ke baad woh REST se current state aur missed alarms dobara le sakta hai.
-
-**Transaction** ka matlab related database changes ek unit ki tarah honge: failover ka half-result save nahi hoga. **Index** ek book ke index jaisa hai—fast lookup ke liye, especially device history aur time-range charts ke liye.

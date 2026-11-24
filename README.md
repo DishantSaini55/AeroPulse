@@ -1,56 +1,43 @@
 # AeroPulse
 
-**AeroPulse** is an independent, portfolio-focused simulation of an airport Communication, Navigation and Surveillance (CNS) operations platform. It models equipment health, active-standby redundancy, faults, diagnosis, incidents, maintenance and reliability analytics.
+AeroPulse is an independent airport infrastructure monitoring simulation inspired by concepts observed during an Airports Authority of India CNS internship. It is a portfolio software project and has no connection to operational airport systems or confidential data.
 
-It is inspired by operational concepts observed during an Airports Authority of India internship. It **does not connect to airport infrastructure, use confidential data, or represent a production airport system**. All equipment data is explicitly simulated. Aviation weather observations will be fetched separately from the public Aviation Weather Center METAR API.
+## Implementation status
 
-## Current status
+The current implementation is a TypeScript Express REST API with a health endpoint and an in-memory simulated operations-note resource. Input validation, JSON error responses and HTTP integration tests are included. Equipment telemetry, PostgreSQL persistence, authentication, real-time delivery and the web interface are planned work; they are not yet implemented.
 
-Phase 1 — project architecture and environment planning — is complete. Application code and dependencies intentionally have not been added yet.
+## API
 
-## Planned technology stack
-
-| Layer | Technology | Purpose |
+| Method | Endpoint | Description |
 | --- | --- | --- |
-| Web application | React, TypeScript, Vite, Tailwind CSS | Operations interface |
-| API | Node.js, Express, TypeScript | REST API and domain services |
-| Real-time delivery | Socket.IO | Live telemetry, alarms and failover updates |
-| Data | PostgreSQL, Prisma | Reliable relational storage and migrations |
-| Validation and security | Zod, JWT, bcrypt | Trusted inputs, authentication and role-based access |
-| Async processing | Redis and BullMQ | Scheduled weather retrieval and background retention work |
-| Deployment | Docker, Nginx, GitHub Actions | Reproducible delivery and later resilience demonstration |
+| GET | `/api/v1/health` | API availability |
+| GET | `/api/v1/notes` | List simulated operations notes |
+| GET | `/api/v1/notes/:id` | Retrieve one note |
+| POST | `/api/v1/notes` | Create a note |
 
-## Architecture and roadmap
+`POST /api/v1/notes` accepts `systemName` and `message` as non-empty strings. Notes are temporary and are cleared when the API process stops. They are not equipment telemetry or operational records.
 
-See [the architecture plan](docs/architecture.md) for the system boundaries, data design, security model and reliability decisions. See [the development roadmap](docs/development-roadmap.md) for the gated milestone plan.
+## Local development
 
-## Repository layout
+Requires Node.js 22 or later and npm. From the repository root:
 
-```text
-apps/
-  api/             # Future Express API and simulator
-  web/             # Future React operations console
-packages/
-  shared/          # Future shared API/event contracts
-docs/              # Architecture and learning documentation
-infra/             # Future Docker, Nginx and CI configuration
+```powershell
+cd apps/api
+npm.cmd ci
+npm.cmd test
+npm.cmd run dev
 ```
 
-## Prerequisites (before Phase 2)
+On systems where the `npm` PowerShell shim works, `npm` can replace `npm.cmd`. The API listens on port 4000 by default; set `PORT` to use another port.
 
-- Node.js 22 LTS or later (available in the current development environment)
-- npm (available as `npm.cmd`; PowerShell currently blocks `npm.ps1`)
-- Docker Desktop (available; its user config needs permission repair before containers are used)
-- PostgreSQL 16+ for local database work, or Docker Desktop once its configuration is accessible
+Example request:
 
-No credentials, secrets or airport-system details belong in this repository. A future `.env.example` will contain names and safe placeholders only.
+```powershell
+Invoke-RestMethod -Uri http://localhost:4000/api/v1/notes -Method Post -ContentType application/json -Body '{"systemName":"Radar System","message":"Training observation"}'
+```
 
-## Planned roles
+## Architecture
 
-- **Administrator** — system configuration, users, equipment, and simulation controls.
-- **Supervisor** — operational oversight, incident assignment, failback and replacement approvals.
-- **Maintenance Engineer** — alarm acknowledgement, investigation and repair records.
+The current API lives in `apps/api`. `apps/web`, `packages/shared` and `infra` reserve space for later components. [Architecture notes](docs/architecture.md) describe the proposed domain model and design decisions. Planned technologies are introduced as the related features are implemented.
 
-## Safety and scope
-
-This project is a training simulation. Never rely on it for operational safety, aviation decisions, maintenance instructions, or real infrastructure monitoring.
+All future equipment readings will be labelled simulated. Public aviation weather observations, when integrated, will be labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions.

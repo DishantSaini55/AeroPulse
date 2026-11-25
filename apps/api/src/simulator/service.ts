@@ -1,5 +1,6 @@
 import type { Database } from '../db.js';
 import { TelemetryGenerator, type Scenario } from './generator.js';
+import type { TelemetryBatchEvent } from '../realtime.js';
 
 const INTERVAL_MS = 5000;
 
@@ -10,7 +11,11 @@ export class TelemetrySimulator {
   private readonly generator = new TelemetryGenerator();
   private readonly scenarios = new Map<string, Scenario>();
 
-  constructor(private readonly db: Database, private readonly intervalMs = INTERVAL_MS) {}
+  constructor(
+    private readonly db: Database,
+    private readonly intervalMs = INTERVAL_MS,
+    private readonly onBatch?: (event: TelemetryBatchEvent) => void,
+  ) {}
 
   // Internal scenario hook; administrator controls will be added in Phase 11.
   setScenario(deviceCode: string, scenario: Scenario) {
@@ -34,6 +39,11 @@ export class TelemetrySimulator {
           data: devices.map((device) => ({ deviceId: device.id, recordedAt: at, simulated: true })),
         });
       });
+      try {
+        this.onBatch?.({ recordedAt: at.toISOString(), deviceCodes: devices.map(device => device.code), simulated: true });
+      } catch (error) {
+        console.error('Telemetry broadcast failed', error);
+      }
       return true;
     } finally {
       this.running = false;

@@ -1,0 +1,44 @@
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { io } from 'socket.io-client';
+
+export type TelemetryEvent = { recordedAt: string; deviceCodes: string[]; simulated: true };
+
+export function useRealtime() {
+  const queryClient = useQueryClient();
+  const [connected, setConnected] = useState(false);
+  const [events, setEvents] = useState<TelemetryEvent[]>([]);
+
+  useEffect(() => {
+    const socket = io({ path: '/socket.io', autoConnect: false });
+    const sync = () => {
+      setConnected(true);
+      // Socket.IO events missed while disconnected are recovered from REST state.
+      void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
+      void queryClient.invalidateQueries({ queryKey: ['history'] });
+    };
+    const disconnect = () => setConnected(false);
+    const onBatch = (event: unknown) => {
+      if (!event || typeof event !== 'object') return;
+      const candidate = event as Partial<TelemetryEvent>;
+      if (candidate.simulated !== true || typeof candidate.recordedAt !== 'string' || !Array.isArray(candidate.deviceCodes) || !candidate.deviceCodes.every(code => typeof code === 'string')) return;
+      setEvents(previous => [candidate as TelemetryEvent, ...previous].slice(0, 30));
+      void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
+      void queryClient.invalidateQueries({ queryKey: ['history'] });
+    };
+    socket.on('connect', sync);
+    socket.on('disconnect', disconnect);
+    socket.on('connect_error', disconnect);
+    socket.on('telemetry:batch', onBatch);
+    socket.connect();
+    return () => {
+      socket.off('connect', sync);
+      socket.off('disconnect', disconnect);
+      socket.off('connect_error', disconnect);
+      socket.off('telemetry:batch', onBatch);
+      socket.disconnect();
+    };
+  }, [queryClient]);
+
+  return { connected, events };
+}

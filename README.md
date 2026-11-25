@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, device history charts and aviation weather view. The operations-note example remains in memory. Authentication and Socket.IO real-time delivery are planned work; the current frontend refreshes through HTTP polling.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, device history charts, aviation weather view and live telemetry event console. Socket.IO broadcasts telemetry batches after database commit; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. The operations-note example remains in memory. Authentication and role-based access are planned work.
 
 ## API
 
@@ -46,7 +46,9 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173/`. Vite proxies `/api` requests to the backend on port 4000. The current working pages are Overview, Infrastructure, Device Details and Aviation Weather. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live values update through HTTP polling until Socket.IO is introduced.
+Open `http://127.0.0.1:5173/`. Vite proxies `/api` and `/socket.io` to the backend on port 4000. The current working pages are Overview, Infrastructure, Device Details and Aviation Weather. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API.
+
+With both servers running, `npm.cmd run check:realtime` from `apps/web` verifies that a telemetry batch reaches a client through the Vite websocket proxy.
 
 On systems where the `npm` PowerShell shim works, `npm` can replace `npm.cmd`. The API listens on port 4000 by default; set `PORT` to use another port.
 

@@ -7,6 +7,7 @@ import {
   Moon, Radio, RefreshCw, Search, Server, Sun, Wifi, WifiOff,
 } from 'lucide-react';
 import { getHistory, getSnapshot, getWeather, type Device, type Telemetry, type Weather } from './api';
+import { useRealtime, type TelemetryEvent } from './useRealtime';
 
 const TelemetryChart = lazy(() => import('./TelemetryChart'));
 
@@ -59,7 +60,7 @@ function WeatherPanel({ weather, loading, error, compact = false }: { weather?: 
   </section>;
 }
 
-function Overview({ devices, loading, error, weather, weatherLoading, weatherError, now }: { devices: Device[]; loading: boolean; error?: Error | null; weather?: Weather; weatherLoading: boolean; weatherError?: Error | null; now: number }) {
+function Overview({ devices, loading, error, weather, weatherLoading, weatherError, now, events, streamConnected }: { devices: Device[]; loading: boolean; error?: Error | null; weather?: Weather; weatherLoading: boolean; weatherError?: Error | null; now: number; events: TelemetryEvent[]; streamConnected: boolean }) {
   const systems = new Set(devices.map(device => device.system.code)).size;
   const active = devices.filter(device => device.activationState === 'ACTIVE').length;
   const reporting = devices.filter(device => fresh(device.latestHeartbeatAt, now)).length;
@@ -87,6 +88,9 @@ function Overview({ devices, loading, error, weather, weatherLoading, weatherErr
             <div className="reading-list">{latest.map(device => <NavLink to={`/devices/${device.code}`} className="reading-row" key={device.code}><span><strong>{device.code}</strong><small>{device.system.name}</small></span><span className="reading-values">{number(device.latestTelemetry?.temperatureC, '°C')}<small>{device.latestTelemetry && shortTime(device.latestTelemetry.recordedAt)}</small></span></NavLink>)}</div>
           </section></div>
       </div>
+      <section className="panel event-console"><div className="panel-head"><div><span className="eyebrow">LIVE EVENT CONSOLE</span><h2>Telemetry stream</h2></div><Badge tone={streamConnected ? 'green' : 'amber'}>{streamConnected ? 'CONNECTED' : 'POLLING FALLBACK'}</Badge></div>
+        {events.length === 0 ? <div className="console-empty">{streamConnected ? 'Waiting for the next simulated telemetry batch…' : 'Stream disconnected. Current state continues through REST polling.'}</div> : <div className="console-list">{events.map((event, index) => <div className="console-line" key={`${event.recordedAt}-${index}`}><span className="mono muted">{shortTime(event.recordedAt)}</span><span className="console-type">TELEMETRY</span><span>Batch persisted for {event.deviceCodes.length} simulated devices</span><span className="console-source">SIMULATION</span></div>)}</div>}
+      </section>
     </DataState>
   </>;
 }
@@ -131,10 +135,10 @@ const metricFields: { key: keyof Telemetry; label: string; unit: string; color: 
   { key: 'currentA', label: 'Current', unit: 'A', color: '#b6a57f' },
 ];
 
-function DeviceDetail({ devices, now, loading, error }: { devices: Device[]; now: number; loading: boolean; error?: Error | null }) {
+function DeviceDetail({ devices, now, loading, error, streamConnected }: { devices: Device[]; now: number; loading: boolean; error?: Error | null; streamConnected: boolean }) {
   const { code = '' } = useParams();
   const device = devices.find(item => item.code === code.toUpperCase());
-  const history = useQuery({ queryKey: ['history', code], queryFn: () => getHistory(code), refetchInterval: 5000, enabled: !!device });
+  const history = useQuery({ queryKey: ['history', code], queryFn: () => getHistory(code), refetchInterval: streamConnected ? false : 5000, enabled: !!device });
   const available = metricFields.filter(field => history.data?.data.some(row => row[field.key] != null));
   const [selected, setSelected] = useState('temperatureC');
   const metric = available.find(field => field.key === selected) ?? available[0];
@@ -162,7 +166,8 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ap-sidebar') === 'collapsed');
   const [theme, setTheme] = useState(() => localStorage.getItem('ap-theme') ?? 'dark');
   const now = useClock();
-  const snapshot = useQuery({ queryKey: ['snapshot'], queryFn: getSnapshot, refetchInterval: 5000 });
+  const realtime = useRealtime();
+  const snapshot = useQuery({ queryKey: ['snapshot'], queryFn: getSnapshot, refetchInterval: realtime.connected ? false : 5000 });
   const weather = useQuery({ queryKey: ['weather'], queryFn: getWeather, refetchInterval: 5 * 60_000 });
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('ap-theme', theme); }, [theme]);
   useEffect(() => { localStorage.setItem('ap-sidebar', collapsed ? 'collapsed' : 'expanded'); }, [collapsed]);
@@ -177,8 +182,8 @@ export default function App() {
       <div className="nav-caption">WORKSPACE</div><nav aria-label="Primary navigation">{navigation.map(({ to, label, icon: Icon, end }) => <NavLink to={to} end={end} key={to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? label : undefined}><Icon size={17} /><span>{label}</span></NavLink>)}</nav>
       <div className="sidebar-bottom"><div className="environment"><span className="env-dot" /><div><strong>SIMULATION</strong><span>Local environment</span></div></div><button className="collapse-button" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}<span>{collapsed ? '' : 'Collapse sidebar'}</span></button></div>
     </aside>
-    <div className="main-area"><header className="topbar"><div className="topbar-title"><span className="topbar-path">AEROPULSE</span><span className="topbar-divider">/</span><span>Operations workspace</span></div><div className="topbar-actions"><span className={`connection ${snapshot.isError ? 'disconnected' : ''}`}>{snapshot.isError ? <WifiOff size={14} /> : <Wifi size={14} />}{snapshot.isError ? 'API DISCONNECTED' : snapshot.isPending ? 'CONNECTING' : 'API CONNECTED'}</span><span className="topbar-time"><Clock3 size={14} /> {new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button></div></header>
-      <main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
+    <div className="main-area"><header className="topbar"><div className="topbar-title"><span className="topbar-path">AEROPULSE</span><span className="topbar-divider">/</span><span>Operations workspace</span></div><div className="topbar-actions"><span className={`connection ${snapshot.isError ? 'disconnected' : ''}`}>{snapshot.isError ? <WifiOff size={14} /> : <Wifi size={14} />}{snapshot.isError ? 'API DISCONNECTED' : realtime.connected ? 'LIVE STREAM' : 'POLLING FALLBACK'}</span><span className="topbar-time"><Clock3 size={14} /> {new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button></div></header>
+      <main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
       <footer className="footer"><span><span className="footer-led" /> AEROPULSE / INDEPENDENT SIMULATION</span><span>Equipment data: simulated · Weather: external observation</span></footer>
     </div>
   </div>;

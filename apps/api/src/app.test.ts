@@ -85,12 +85,13 @@ test('database asset registry returns ten systems and twenty devices', { skip: !
 
 test('one simulator tick persists 20 readings and heartbeats', { skip: !process.env.DATABASE_URL }, async () => {
   const db = createDb();
-  const beforeReadings = await db.telemetryReading.count();
-  const beforeHeartbeats = await db.heartbeat.count();
+  const at = new Date(Date.now() - 86_400_000);
+  const beforeReadings = await db.telemetryReading.count({ where: { recordedAt: at } });
+  const beforeHeartbeats = await db.heartbeat.count({ where: { recordedAt: at } });
   const simulator = new TelemetrySimulator(db);
-  await simulator.tick();
-  assert.equal(await db.telemetryReading.count(), beforeReadings + 20);
-  assert.equal(await db.heartbeat.count(), beforeHeartbeats + 20);
+  await simulator.tick(at);
+  assert.equal(await db.telemetryReading.count({ where: { recordedAt: at } }), beforeReadings + 20);
+  assert.equal(await db.heartbeat.count({ where: { recordedAt: at } }), beforeHeartbeats + 20);
   const assetServer = createApp(db).listen(0);
   try {
     await new Promise<void>((resolve) => assetServer.once('listening', resolve));
@@ -112,20 +113,20 @@ test('one simulator tick persists 20 readings and heartbeats', { skip: !process.
 
 test('scheduler repeats ticks and stops cleanly', { skip: !process.env.DATABASE_URL }, async () => {
   const db = createDb();
-  const initial = await db.telemetryReading.count();
-  const simulator = new TelemetrySimulator(db, 25);
+  const events: string[] = [];
+  const simulator = new TelemetrySimulator(db, 25, event => events.push(event.recordedAt));
   simulator.start();
   try {
     const deadline = Date.now() + 10000;
-    while ((await db.telemetryReading.count()) < initial + 40 && Date.now() < deadline) {
+    while (events.length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.ok((await db.telemetryReading.count()) >= initial + 40);
+    assert.ok(events.length >= 2);
   } finally {
     await simulator.stop();
   }
-  const stoppedAt = await db.telemetryReading.count();
+  const stoppedAt = events.length;
   await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(await db.telemetryReading.count(), stoppedAt);
+  assert.equal(events.length, stoppedAt);
   await db.$disconnect();
 });

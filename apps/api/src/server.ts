@@ -2,6 +2,8 @@ import { createApp } from './app.js';
 import { createDb } from './db.js';
 import { TelemetrySimulator } from './simulator/service.js';
 import { WeatherService } from './weather/service.js';
+import { createServer } from 'node:http';
+import { attachRealtime } from './realtime.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -10,18 +12,20 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 const db = createDb();
 await db.$connect();
-const simulator = new TelemetrySimulator(db);
 const weather = new WeatherService(db);
+const server = createServer(createApp(db, weather));
+const io = attachRealtime(server);
+const simulator = new TelemetrySimulator(db, 5000, event => io.emit('telemetry:batch', event));
 simulator.start();
 weather.start();
-const server = createApp(db, weather).listen(port, () => {
+server.listen(port, () => {
   console.log(`AeroPulse API listening on http://localhost:${port}`);
 });
 
 async function shutdown() {
-  server.close();
   await simulator.stop();
   await weather.stop();
+  await new Promise<void>(resolve => io.close(() => resolve()));
   await db.$disconnect();
 }
 process.once('SIGINT', shutdown);

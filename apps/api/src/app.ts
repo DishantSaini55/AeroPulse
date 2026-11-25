@@ -50,6 +50,34 @@ export function createApp(db?: Database) {
     response.json({ data: system, simulated: true });
   });
 
+  app.get('/api/v1/devices/:code/telemetry', async (request, response) => {
+    if (!db) {
+      response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
+      return;
+    }
+    const query = z.strictObject({
+      page: z.coerce.number().int().min(1).max(100000).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    }).safeParse(request.query);
+    if (!query.success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid pagination' } });
+      return;
+    }
+    const code = String(request.params.code).toUpperCase();
+    const device = await db.device.findUnique({ where: { code }, select: { id: true, code: true } });
+    if (!device) {
+      response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
+      return;
+    }
+    const { page, limit } = query.data;
+    const [total, data, heartbeat] = await db.$transaction([
+      db.telemetryReading.count({ where: { deviceId: device.id } }),
+      db.telemetryReading.findMany({ where: { deviceId: device.id }, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit }),
+      db.heartbeat.findFirst({ where: { deviceId: device.id }, orderBy: { recordedAt: 'desc' }, select: { recordedAt: true } }),
+    ]);
+    response.json({ deviceCode: device.code, data, page, limit, total, latestHeartbeatAt: heartbeat?.recordedAt ?? null, simulated: true });
+  });
+
   app.get('/api/v1/notes', (_request, response) => {
     response.json({ data: [...notes.values()], simulated: true });
   });

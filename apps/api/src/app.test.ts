@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import { createApp } from './app.js';
 import { createDb } from './db.js';
+import { TelemetrySimulator } from './simulator/service.js';
 
 let server: Server;
 let baseUrl: string;
@@ -76,4 +77,51 @@ test('database asset registry returns ten systems and twenty devices', { skip: !
     await new Promise<void>((resolve, reject) => assetServer.close((error) => error ? reject(error) : resolve()));
     await db.$disconnect();
   }
+});
+
+test('one simulator tick persists 20 readings and heartbeats', { skip: !process.env.DATABASE_URL }, async () => {
+  const db = createDb();
+  const beforeReadings = await db.telemetryReading.count();
+  const beforeHeartbeats = await db.heartbeat.count();
+  const simulator = new TelemetrySimulator(db);
+  await simulator.tick();
+  assert.equal(await db.telemetryReading.count(), beforeReadings + 20);
+  assert.equal(await db.heartbeat.count(), beforeHeartbeats + 20);
+  const assetServer = createApp(db).listen(0);
+  try {
+    await new Promise<void>((resolve) => assetServer.once('listening', resolve));
+    const address = assetServer.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/devices/RADAR-P/telemetry?limit=1`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { data: Array<{ simulated: boolean; temperatureC: number }>; latestHeartbeatAt: string };
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0]?.simulated, true);
+    assert.equal(typeof body.data[0]?.temperatureC, 'number');
+    assert.ok(body.latestHeartbeatAt);
+    assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/v1/devices/RADAR-P/telemetry?limit=0`)).status, 400);
+  } finally {
+    await new Promise<void>((resolve, reject) => assetServer.close((error) => error ? reject(error) : resolve()));
+    await db.$disconnect();
+  }
+});
+
+test('scheduler repeats ticks and stops cleanly', { skip: !process.env.DATABASE_URL }, async () => {
+  const db = createDb();
+  const initial = await db.telemetryReading.count();
+  const simulator = new TelemetrySimulator(db, 25);
+  simulator.start();
+  try {
+    const deadline = Date.now() + 10000;
+    while ((await db.telemetryReading.count()) < initial + 40 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok((await db.telemetryReading.count()) >= initial + 40);
+  } finally {
+    await simulator.stop();
+  }
+  const stoppedAt = await db.telemetryReading.count();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(await db.telemetryReading.count(), stoppedAt);
+  await db.$disconnect();
 });

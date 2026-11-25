@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation is a TypeScript Express API with a PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices. Input validation, JSON error responses and HTTP tests are included. The operations-note example remains in memory. Equipment telemetry, authentication, real-time delivery and the web interface are planned work; they are not yet implemented.
+The current implementation is a TypeScript Express API with a PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices. A dedicated simulator writes equipment-specific telemetry and heartbeats every five seconds. Readings are explicitly simulated. Input validation, JSON error responses and HTTP tests are included. The operations-note example remains in memory. Authentication, real-time delivery and the web interface are planned work; they are not yet implemented.
 
 ## API
 
@@ -13,11 +13,14 @@ The current implementation is a TypeScript Express API with a PostgreSQL/Prisma 
 | GET | `/api/v1/health` | API availability |
 | GET | `/api/v1/systems` | List systems with primary and secondary devices |
 | GET | `/api/v1/systems/:code` | Retrieve one logical system |
+| GET | `/api/v1/devices/:code/telemetry` | Paginated telemetry history and latest heartbeat |
 | GET | `/api/v1/notes` | List simulated operations notes |
 | GET | `/api/v1/notes/:id` | Retrieve one note |
 | POST | `/api/v1/notes` | Create a note |
 
 `POST /api/v1/notes` accepts `systemName` and `message` as non-empty strings. Notes are temporary and are cleared when the API process stops. They are not equipment telemetry or operational records.
+
+Telemetry history accepts `page` (default `1`) and `limit` (default `20`, maximum `100`). The simulator's default scenario is normal operation; its internal generator also supports gradual degradation, failure and recovery for future administrator-controlled simulation. The simulator currently runs in one API process. Multi-instance coordination and telemetry retention are planned for later infrastructure work.
 
 ## Local development
 
@@ -38,6 +41,7 @@ Example request:
 
 ```powershell
 Invoke-RestMethod -Uri http://localhost:4000/api/v1/notes -Method Post -ContentType application/json -Body '{"systemName":"Radar System","message":"Training observation"}'
+Invoke-RestMethod -Uri 'http://localhost:4000/api/v1/devices/RADAR-P/telemetry?limit=5'
 ```
 
 ## Architecture

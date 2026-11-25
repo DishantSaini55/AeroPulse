@@ -53,7 +53,42 @@ model Device {
   commissionedAt  DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  telemetry       TelemetryReading[]
+  heartbeats      Heartbeat[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
+}
+
+model TelemetryReading {
+  id            String   @id @default(uuid()) @db.Uuid
+  deviceId      String   @db.Uuid
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  recordedAt    DateTime @default(now())
+  temperatureC  Float?
+  cpuPercent    Float?
+  memoryPercent Float?
+  diskPercent   Float?
+  latencyMs     Float?
+  packetLossPct Float?
+  voltageV      Float?
+  currentA      Float?
+  fanRpm        Float?
+  batteryPct    Float?
+  signalPct     Float?
+  simulated     Boolean  @default(true)
+
+  @@index([deviceId, recordedAt(sort: Desc)])
+  @@index([recordedAt])
+}
+
+model Heartbeat {
+  id         String   @id @default(uuid()) @db.Uuid
+  deviceId   String   @db.Uuid
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  recordedAt DateTime @default(now())
+  simulated  Boolean  @default(true)
+
+  @@index([deviceId, recordedAt(sort: Desc)])
+  @@index([recordedAt])
 }

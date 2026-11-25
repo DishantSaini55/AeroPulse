@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { createDb } from './db.js';
+import { TelemetrySimulator } from './simulator/service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -8,12 +9,15 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 const db = createDb();
 await db.$connect();
+const simulator = new TelemetrySimulator(db);
+simulator.start();
 const server = createApp(db).listen(port, () => {
   console.log(`AeroPulse API listening on http://localhost:${port}`);
 });
 
 async function shutdown() {
   server.close();
+  await simulator.stop();
   await db.$disconnect();
 }
 process.once('SIGINT', shutdown);

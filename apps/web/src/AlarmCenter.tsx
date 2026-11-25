@@ -7,69 +7,77 @@ import { formatUtcDateTime } from './time';
 import type { AlarmNotice } from './useRealtime';
 import './alarms.css';
 
-function sound(context: AudioContext, level: AlarmNotice['level'], volume: number) {
-  const frequencies = { INFORMATION: [520], WARNING: [650, 650], MAJOR: [780, 620, 780], CRITICAL: [940, 760, 940, 760] }[level];
-  frequencies.forEach((frequency, index) => {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const start = context.currentTime + index * 0.23;
-    oscillator.type = level === 'CRITICAL' ? 'sawtooth' : 'sine';
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume * 0.12), start + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start(start); oscillator.stop(start + 0.19);
-  });
-}
-
 export function AlarmBanner({ notices }: { notices: AlarmNotice[] }) {
   const query = useQuery({ queryKey: ['alarms', 'true'], queryFn: () => getAlarms('true'), refetchInterval: 10000 });
   const active = query.data ?? [];
+  const activeErrorKeys = active.filter(alarm => alarm.level !== 'INFORMATION').map(alarm => `${alarm.id}:${alarm.level}`);
+  const activeErrorKey = [...activeErrorKeys].sort().join('|');
   const highest = active.some(item => item.level === 'CRITICAL') ? 'CRITICAL' : active.some(item => item.level === 'MAJOR') ? 'MAJOR' : active.some(item => item.level === 'WARNING') ? 'WARNING' : 'INFORMATION';
   const [enabled, setEnabled] = useState(false);
   const [muted, setMuted] = useState(() => localStorage.getItem('ap-alarm-muted') === 'true');
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('ap-alarm-volume') ?? 0.5));
-  const context = useRef<AudioContext | null>(null);
-  const announced = useRef(new Set<string>());
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const seen = useRef(new Set<string>());
+  const activeKeys = useRef(new Set(activeErrorKeys));
+  const repeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  activeKeys.current = new Set(activeErrorKeys);
+  function stopPlayback() {
+    if (stopTimer.current) clearTimeout(stopTimer.current);
+    stopTimer.current = null;
+    audio.current?.pause();
+    if (audio.current) audio.current.currentTime = 0;
+  }
+  function stopCycle() {
+    if (repeatTimer.current) clearInterval(repeatTimer.current);
+    repeatTimer.current = null;
+    stopPlayback();
+  }
+  function playTenSeconds() {
+    if (!audio.current) return;
+    stopPlayback();
+    void audio.current.play().catch(error => console.error('Alarm audio playback failed', error));
+    stopTimer.current = setTimeout(stopPlayback, 10000);
+  }
+  function startCycle() {
+    stopCycle();
+    playTenSeconds();
+    repeatTimer.current = setInterval(() => {
+      if (activeKeys.current.size) playTenSeconds();
+      else stopCycle();
+    }, 60000);
+  }
   useEffect(() => { localStorage.setItem('ap-alarm-muted', String(muted)); localStorage.setItem('ap-alarm-volume', String(volume)); }, [muted, volume]);
   useEffect(() => {
+    audio.current = new Audio('/alarm-error.mp3');
+    audio.current.loop = true;
+    return () => { stopCycle(); audio.current = null; };
+  }, []);
+  useEffect(() => { if (audio.current) audio.current.volume = volume; }, [volume]);
+  useEffect(() => {
     const notice = notices[0];
-    if (!notice) return;
-    if (!enabled || muted || !context.current) return;
+    if (!notice || notice.level === 'INFORMATION' || !enabled || muted) return;
     const key = `${notice.id}:${notice.level}`;
-    if (announced.current.has(key)) return;
-    announced.current.add(key);
-    sound(context.current, notice.level, volume);
-    if ('speechSynthesis' in window && notice.level !== 'INFORMATION') {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(`${notice.level.toLowerCase()} alert. ${notice.message}`);
-      utterance.lang = 'en-US'; utterance.volume = volume; utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
-    }
+    if (seen.current.has(key)) return;
+    seen.current.add(key);
+    startCycle();
   }, [notices, enabled, muted, volume]);
   useEffect(() => {
-    if (!enabled || muted || !context.current || !active.length) return;
-    const unseen = active.filter(alarm => !alarm.acknowledged && !announced.current.has(`${alarm.id}:${alarm.level}`));
-    if (!unseen.length) return;
-    unseen.forEach(alarm => announced.current.add(`${alarm.id}:${alarm.level}`));
-    const alarm = unseen.find(item => item.level === 'CRITICAL') ?? unseen.find(item => item.level === 'MAJOR') ?? unseen[0]!;
-    sound(context.current, alarm.level, volume);
-    if ('speechSynthesis' in window && alarm.level !== 'INFORMATION') {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(`${alarm.level.toLowerCase()} alert. ${alarm.message}`);
-      utterance.lang = 'en-US'; utterance.volume = volume; utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
+    if (!enabled || muted) { stopCycle(); return; }
+    if (!query.isSuccess) return;
+    if (!activeErrorKeys.length) { stopCycle(); seen.current.clear(); return; }
+    const newError = activeErrorKeys.some(key => !seen.current.has(key));
+    activeErrorKeys.forEach(key => seen.current.add(key));
+    if (newError || !repeatTimer.current) startCycle();
+  }, [activeErrorKey, enabled, muted, query.isSuccess]);
+  function enable() {
+    if (!muted && activeErrorKeys.length) {
+      activeErrorKeys.forEach(key => seen.current.add(key));
+      startCycle();
     }
-  }, [active, enabled, muted, volume]);
-  useEffect(() => () => { void context.current?.close(); window.speechSynthesis?.cancel(); }, []);
-  async function enable() {
-    context.current ??= new AudioContext();
-    await context.current.resume();
-    if (!active.some(alarm => !alarm.acknowledged)) sound(context.current, 'INFORMATION', volume);
     setEnabled(true);
   }
-  return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE ALARM${active.length === 1 ? '' : 'S'}` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls">{!enabled ? <button onClick={() => void enable()}>Enable alarm sound</button> : <><button aria-label={muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => setMuted(value => !value)}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><label>Volume <input aria-label="Alarm volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event => setVolume(Number(event.target.value))} /></label></>}</div></div>;
+  return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE ALARM${active.length === 1 ? '' : 'S'}` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls">{!enabled ? <button onClick={enable}>Enable alarm sound</button> : <><button aria-label={muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => setMuted(value => !value)}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><label>Volume <input aria-label="Alarm volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event => setVolume(Number(event.target.value))} /></label></>}</div></div>;
 }
 
 function AlarmRow({ alarm }: { alarm: Alarm }) {

@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation is a TypeScript Express API with a PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices. A dedicated simulator writes equipment-specific telemetry and heartbeats every five seconds. A separate backend service retrieves real VIDP METAR observations from the public Aviation Weather Center API, caches them for five minutes and persists them. Weather responses expose stale and unavailable states. Input validation, JSON error responses and HTTP tests are included. The operations-note example remains in memory. Authentication, real-time delivery and the web interface are planned work; they are not yet implemented.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, device history charts and aviation weather view. The operations-note example remains in memory. Authentication and Socket.IO real-time delivery are planned work; the current frontend refreshes through HTTP polling.
 
 ## API
 
@@ -38,6 +38,16 @@ npm.cmd test
 npm.cmd run dev
 ```
 
+In a second terminal, start the frontend:
+
+```powershell
+cd apps/web
+npm.cmd ci
+npm.cmd run dev
+```
+
+Open `http://127.0.0.1:5173/`. Vite proxies `/api` requests to the backend on port 4000. The current working pages are Overview, Infrastructure, Device Details and Aviation Weather. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live values update through HTTP polling until Socket.IO is introduced.
+
 On systems where the `npm` PowerShell shim works, `npm` can replace `npm.cmd`. The API listens on port 4000 by default; set `PORT` to use another port.
 
 Example request:
@@ -50,6 +60,6 @@ Invoke-RestMethod -Uri 'http://localhost:4000/api/v1/weather/vidp'
 
 ## Architecture
 
-The current API lives in `apps/api`. `apps/web`, `packages/shared` and `infra` reserve space for later components. Planned technologies will be introduced as the related features are implemented.
+The API lives in `apps/api`, and the React console in `apps/web`. `packages/shared` and `infra` reserve space for later components. Planned technologies will be introduced as the related features are implemented.
 
 All future equipment readings will be labelled simulated. Public aviation weather observations, when integrated, will be labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions.

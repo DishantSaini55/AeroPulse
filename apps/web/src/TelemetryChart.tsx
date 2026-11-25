@@ -1,0 +1,5 @@
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+
+export default function TelemetryChart({ data, metric }: { data: { time: string; value: string | number | boolean | null | undefined }[]; metric: { label: string; unit: string; color: string } }) {
+  return <ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 14, right: 16, left: -15, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--line)" strokeDasharray="3 4" /><XAxis dataKey="time" tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={35} /><YAxis tick={{ fill: 'var(--muted)', fontSize: 11 }} tickLine={false} axisLine={false} domain={['auto', 'auto']} /><Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--line)', color: 'var(--text)', fontSize: 12 }} formatter={(value) => [`${value} ${metric.unit}`, metric.label]} /><Line type="monotone" dataKey="value" stroke={metric.color} strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer>;
+}

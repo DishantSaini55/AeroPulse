@@ -60,6 +60,30 @@ export function createApp(db?: Database, weather?: WeatherService) {
     response.json({ data: system, simulated: true });
   });
 
+  app.get('/api/v1/monitoring/snapshot', async (_request, response) => {
+    if (!db) {
+      response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
+      return;
+    }
+    const devices = await db.device.findMany({
+      orderBy: [{ system: { code: 'asc' } }, { role: 'asc' }],
+      include: {
+        system: { select: { code: true, name: true, availability: true } },
+        telemetry: { take: 1, orderBy: { recordedAt: 'desc' } },
+        heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } },
+      },
+    });
+    response.json({
+      recordedAt: new Date().toISOString(),
+      simulated: true,
+      data: devices.map(({ telemetry, heartbeats, ...device }) => ({
+        ...device,
+        latestTelemetry: telemetry[0] ?? null,
+        latestHeartbeatAt: heartbeats[0]?.recordedAt ?? null,
+      })),
+    });
+  });
+
   app.get('/api/v1/devices/:code/telemetry', async (request, response) => {
     if (!db) {
       response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });

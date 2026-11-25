@@ -73,6 +73,10 @@ test('database asset registry returns ten systems and twenty devices', { skip: !
     assert.equal(radar.status, 200);
     assert.equal((await radar.json() as { data: { devices: unknown[] } }).data.devices.length, 2);
     assert.equal((await fetch(`${url}/api/v1/systems/UNKNOWN`)).status, 404);
+    const snapshot = await fetch(`${url}/api/v1/monitoring/snapshot`);
+    assert.equal(snapshot.status, 200);
+    const monitoring = await snapshot.json() as { data: Array<{ latestTelemetry: unknown; latestHeartbeatAt: string | null }> };
+    assert.equal(monitoring.data.length, 20);
   } finally {
     await new Promise<void>((resolve, reject) => assetServer.close((error) => error ? reject(error) : resolve()));
     await db.$disconnect();

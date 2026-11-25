@@ -37,6 +37,11 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     const adminHeaders = { authorization: `Bearer ${adminResult.token}` };
     assert.equal((await fetch(`${url}/api/v1/auth/me`, { headers: adminHeaders })).status, 200);
     assert.equal((await fetch(`${url}/api/v1/systems`, { headers: adminHeaders })).status, 200);
+    const redundancy = await fetch(`${url}/api/v1/redundancy`, { headers: adminHeaders });
+    assert.equal(redundancy.status, 200);
+    const redundancyBody = await redundancy.json() as { data: unknown[]; policy: { missedHeartbeatLimit: number } };
+    assert.equal(redundancyBody.data.length, 10);
+    assert.equal(redundancyBody.policy.missedHeartbeatLimit, 3);
     const engineerResult = await (await login(engineer.email, password)).json() as { token: string };
     const engineerHeaders = { authorization: `Bearer ${engineerResult.token}` };
     assert.equal((await fetch(`${url}/api/v1/systems`, { headers: engineerHeaders })).status, 200);

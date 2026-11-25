@@ -17,6 +17,7 @@ export function useRealtime() {
       // Socket.IO events missed while disconnected are recovered from REST state.
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['history'] });
+      void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
     };
     const disconnect = () => setConnected(false);
     const onBatch = (event: unknown) => {
@@ -26,6 +27,11 @@ export function useRealtime() {
       setEvents(previous => [candidate as TelemetryEvent, ...previous].slice(0, 30));
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['history'] });
+      void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
+    };
+    const onStatus = () => {
+      void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
+      void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
     };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);
@@ -35,12 +41,14 @@ export function useRealtime() {
     };
     socket.on('connect_error', connectError);
     socket.on('telemetry:batch', onBatch);
+    socket.on('status:changed', onStatus);
     socket.connect();
     return () => {
       socket.off('connect', sync);
       socket.off('disconnect', disconnect);
       socket.off('connect_error', connectError);
       socket.off('telemetry:batch', onBatch);
+      socket.off('status:changed', onStatus);
       socket.disconnect();
     };
   }, [queryClient]);

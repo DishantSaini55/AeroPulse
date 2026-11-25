@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, device history charts, aviation weather view and live telemetry event console. Socket.IO broadcasts telemetry batches after database commit; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators can manage users and create temporary operations notes; supervisors and maintenance engineers have read access.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, redundancy view, device history charts, aviation weather view and live telemetry event console. Socket.IO broadcasts telemetry batches after database commit and status changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators can manage users and create temporary operations notes; supervisors and maintenance engineers have read access.
 
 ## API
 
@@ -17,6 +17,7 @@ The current implementation includes a TypeScript Express API, PostgreSQL/Prisma 
 | PATCH | `/api/v1/users/:id` | Change account role, name or active state (administrator) |
 | GET | `/api/v1/systems` | List systems with primary and secondary devices |
 | GET | `/api/v1/systems/:code` | Retrieve one logical system |
+| GET | `/api/v1/redundancy` | Active assignments, standby readiness, heartbeat policy and service state |
 | GET | `/api/v1/devices/:code/telemetry` | Paginated telemetry history and latest heartbeat |
 | GET | `/api/v1/weather/vidp` | Real VIDP METAR observation with cache and freshness state |
 | GET | `/api/v1/notes` | List simulated operations notes |
@@ -26,6 +27,8 @@ The current implementation includes a TypeScript Express API, PostgreSQL/Prisma 
 All endpoints except health and login require `Authorization: Bearer <token>`. The Socket.IO handshake also requires the token in `auth.token`. `POST /api/v1/notes` is administrator-only and accepts `systemName` and `message` as non-empty strings. Notes are temporary and are cleared when the API process stops. They are not equipment telemetry or operational records.
 
 Telemetry history accepts `page` (default `1`) and `limit` (default `20`, maximum `100`). The simulator's default scenario is normal operation; its internal generator also supports gradual degradation, failure and recovery for future administrator-controlled simulation. The simulator currently runs in one API process. Multi-instance coordination and telemetry retention are planned for later infrastructure work.
+
+The heartbeat monitor checks every five seconds. By default, a device becomes unavailable after three missed expected five-second heartbeats; set `HEARTBEAT_MISSED_LIMIT` (1–12) to change the threshold. Its state returns to healthy when a fresh heartbeat arrives. Logical service availability follows the active device. A healthy standby is shown as ready but is not activated automatically yet; automatic failover and manual failback belong to the next phase.
 
 The weather response is labelled `simulated: false` and includes observation and fetch timestamps, temperature (°C), dew point (°C), visibility (statute miles), wind speed (knots), wind direction (degrees), pressure (hPa), conditions and raw METAR when available. A cached observation may be returned with `stale: true` after an upstream error; without an observation the endpoint returns `503`. The Aviation Weather Center is an external source and may be unavailable.
 
@@ -53,7 +56,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173/` and sign in. Vite proxies `/api` and `/socket.io` to the backend on port 4000. Administrators also see User management. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API. The browser keeps the JWT in session storage, which clears when its tab session ends.
+Open `http://127.0.0.1:5173/` and sign in. Vite proxies `/api` and `/socket.io` to the backend on port 4000. The Redundancy page shows per-device heartbeat recency, active assignment and standby readiness. Administrators also see User management. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry and status events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API. The browser keeps the JWT in session storage, which clears when its tab session ends.
 
 With both servers running, set `REALTIME_TOKEN` to a valid token from `POST /api/v1/auth/login`, then run `npm.cmd run check:realtime` from `apps/web` to verify a telemetry batch through the Vite websocket proxy.
 

@@ -6,6 +6,7 @@ import type { Database } from './db.js';
 import type { WeatherService } from './weather/service.js';
 import { normalizeEmail, passwordSchema, type AuthProvider, type PublicUser } from './auth.js';
 import type { UserRole } from './generated/prisma/enums.js';
+import { heartbeatPolicyFromEnv, type HeartbeatPolicy } from './heartbeat/monitor.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -28,7 +29,7 @@ const userUpdate = z.strictObject({
   active: z.boolean().optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one field is required');
 
-export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void) {
+export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv()) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -178,6 +179,33 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
       return;
     }
     response.json({ data: system, simulated: true });
+  });
+
+  app.get('/api/v1/redundancy', async (_request, response) => {
+    if (!db) {
+      response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
+      return;
+    }
+    const systems = await db.logicalSystem.findMany({
+      orderBy: { code: 'asc' },
+      include: { devices: { orderBy: { role: 'asc' }, include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } } },
+    });
+    response.json({
+      recordedAt: new Date().toISOString(), simulated: true, policy: heartbeatPolicy,
+      data: systems.map(system => {
+        const devices = system.devices.map(({ heartbeats, ...device }) => ({
+          id: device.id, code: device.code, name: device.name, role: device.role,
+          health: device.health, activationState: device.activationState,
+          latestHeartbeatAt: heartbeats[0]?.recordedAt ?? null,
+        }));
+        return {
+          id: system.id, code: system.code, name: system.name, availability: system.availability,
+          activeDeviceCode: devices.find(device => device.activationState === 'ACTIVE')?.code ?? null,
+          standbyReady: devices.some(device => device.activationState === 'STANDBY' && device.health === 'HEALTHY'),
+          devices,
+        };
+      }),
+    });
   });
 
   app.get('/api/v1/monitoring/snapshot', async (_request, response) => {

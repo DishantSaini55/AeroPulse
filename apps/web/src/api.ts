@@ -74,6 +74,17 @@ async function getJson<T>(path: string, allowUnavailable = false): Promise<T> {
 export const getSnapshot = () => getJson<Snapshot>('/api/v1/monitoring/snapshot');
 export const getHistory = (code: string) => getJson<TelemetryHistory>(`/api/v1/devices/${encodeURIComponent(code)}/telemetry?limit=60`);
 export const getWeather = () => getJson<Weather>('/api/v1/weather/vidp', true);
+export type Redundancy = {
+  recordedAt: string;
+  simulated: true;
+  policy: { expectedIntervalMs: number; missedHeartbeatLimit: number; timeoutMs: number };
+  data: {
+    id: string; code: string; name: string; availability: 'AVAILABLE' | 'DEGRADED' | 'OUTAGE';
+    activeDeviceCode: string | null; standbyReady: boolean;
+    devices: { id: string; code: string; name: string; role: 'PRIMARY' | 'SECONDARY'; health: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RECOVERING'; activationState: 'ACTIVE' | 'STANDBY' | 'INELIGIBLE'; latestHeartbeatAt: string | null }[];
+  }[];
+};
+export const getRedundancy = () => getJson<Redundancy>('/api/v1/redundancy');
 
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;

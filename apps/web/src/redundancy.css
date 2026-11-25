@@ -1,0 +1,17 @@
+.redundancy-summary { display: grid; grid-template-columns: repeat(3,1fr); border: 1px solid var(--line); background: var(--surface); margin-bottom: 19px; }
+.redundancy-summary > div { min-height: 83px; padding: 18px 21px; border-right: 1px solid var(--line); display: grid; gap: 12px; }
+.redundancy-summary > div:last-child { border: 0; }
+.redundancy-summary span { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .9px; }
+.redundancy-summary strong { font-family: 'DM Mono', ui-monospace, Consolas, monospace; font-size: 21px; font-weight: 500; }
+.redundancy-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 17px; }
+.redundancy-system .panel-head { min-height: 71px; }
+.redundancy-devices { display: grid; }
+.redundancy-device { min-height: 55px; display: grid; grid-template-columns: 75px 1fr 100px 85px 135px; gap: 9px; align-items: center; padding: 9px 20px; border-bottom: 1px solid var(--line-soft); font-size: 11px; }
+.redundancy-role { color: var(--faint); font-size: 9px; font-weight: 700; letter-spacing: .7px; }
+.redundancy-device .device-link { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+.redundancy-assignment { color: var(--muted); }
+.redundancy-last { color: var(--faint); text-align: right; }
+.redundancy-foot { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.redundancy-foot span { margin-left: auto; }
+@media (max-width: 1350px) { .redundancy-list { grid-template-columns: 1fr; } }
+@media (max-width: 650px) { .redundancy-summary { grid-template-columns: 1fr; }.redundancy-summary > div { min-height: 63px; border-right: 0; border-bottom: 1px solid var(--line); }.redundancy-device { grid-template-columns: 70px 1fr 90px; }.redundancy-assignment,.redundancy-last { display: none; } }

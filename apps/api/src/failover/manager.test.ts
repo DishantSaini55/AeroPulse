@@ -15,7 +15,7 @@ function fixture(standbyFresh = true) {
   const events: { action: string; result: string; toDeviceId?: string | null }[] = [];
   const db = {
     logicalSystem: {
-      findMany: async () => [{ id: system.id }],
+      findMany: async () => [system],
       findUniqueOrThrow: async () => system,
       findUnique: async () => ({ id: system.id }),
       update: async ({ data }: { data: { availability: string } }) => Object.assign(system, data),

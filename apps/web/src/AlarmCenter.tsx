@@ -31,15 +31,15 @@ export function AlarmBanner({ notices }: { notices: AlarmNotice[] }) {
   const [muted, setMuted] = useState(() => localStorage.getItem('ap-alarm-muted') === 'true');
   const [volume, setVolume] = useState(() => Number(localStorage.getItem('ap-alarm-volume') ?? 0.5));
   const context = useRef<AudioContext | null>(null);
-  const lastProcessed = useRef('');
+  const announced = useRef(new Set<string>());
   useEffect(() => { localStorage.setItem('ap-alarm-muted', String(muted)); localStorage.setItem('ap-alarm-volume', String(volume)); }, [muted, volume]);
   useEffect(() => {
     const notice = notices[0];
     if (!notice) return;
-    const key = `${notice.id}:${notice.level}:${notice.createdAt}`;
-    if (key === lastProcessed.current) return;
-    lastProcessed.current = key;
     if (!enabled || muted || !context.current) return;
+    const key = `${notice.id}:${notice.level}`;
+    if (announced.current.has(key)) return;
+    announced.current.add(key);
     sound(context.current, notice.level, volume);
     if ('speechSynthesis' in window && notice.level !== 'INFORMATION') {
       window.speechSynthesis.cancel();
@@ -48,10 +48,25 @@ export function AlarmBanner({ notices }: { notices: AlarmNotice[] }) {
       window.speechSynthesis.speak(utterance);
     }
   }, [notices, enabled, muted, volume]);
+  useEffect(() => {
+    if (!enabled || muted || !context.current || !active.length) return;
+    const unseen = active.filter(alarm => !alarm.acknowledged && !announced.current.has(`${alarm.id}:${alarm.level}`));
+    if (!unseen.length) return;
+    unseen.forEach(alarm => announced.current.add(`${alarm.id}:${alarm.level}`));
+    const alarm = unseen.find(item => item.level === 'CRITICAL') ?? unseen.find(item => item.level === 'MAJOR') ?? unseen[0]!;
+    sound(context.current, alarm.level, volume);
+    if ('speechSynthesis' in window && alarm.level !== 'INFORMATION') {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(`${alarm.level.toLowerCase()} alert. ${alarm.message}`);
+      utterance.lang = 'en-US'; utterance.volume = volume; utterance.rate = 0.95;
+      window.speechSynthesis.speak(utterance);
+    }
+  }, [active, enabled, muted, volume]);
   useEffect(() => () => { void context.current?.close(); window.speechSynthesis?.cancel(); }, []);
   async function enable() {
     context.current ??= new AudioContext();
     await context.current.resume();
+    if (!active.some(alarm => !alarm.acknowledged)) sound(context.current, 'INFORMATION', volume);
     setEnabled(true);
   }
   return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE ALARM${active.length === 1 ? '' : 'S'}` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls">{!enabled ? <button onClick={() => void enable()}>Enable alarm sound</button> : <><button aria-label={muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => setMuted(value => !value)}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><label>Volume <input aria-label="Alarm volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event => setVolume(Number(event.target.value))} /></label></>}</div></div>;

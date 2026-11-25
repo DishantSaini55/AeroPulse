@@ -25,9 +25,16 @@ const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs);
 const alarms = new AlarmService(db, event => io.emit('alarm:raised', event));
 const simulator = new TelemetrySimulator(db, 5000, event => {
   io.emit('telemetry:batch', event);
-  void (async () => { await diagnosis.scan(); await alarms.sync(); })().catch(error => console.error('Diagnosis/alarm scan failed', error));
+  void (async () => {
+    try { await diagnosis.scan(); }
+    catch (error) { console.error('Diagnosis scan failed', error); }
+    await alarms.sync();
+  })().catch(error => console.error('Alarm scan failed', error));
 });
-const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => io.emit('status:changed', change));
+const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => {
+  io.emit('status:changed', change);
+  void alarms.sync().catch(error => console.error('Outage alarm scan failed', error));
+});
 const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator));
 io = attachRealtime(server, auth);
 simulator.start();

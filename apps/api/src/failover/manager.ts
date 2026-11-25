@@ -12,10 +12,19 @@ export class RedundancyManager {
   constructor(private readonly db: Database, readonly policy: HeartbeatPolicy, private readonly onChange?: (change: StatusChange) => void) {}
 
   async check(at = new Date(), systemId?: string): Promise<StatusChange | null> {
-    const systems = systemId ? [{ id: systemId }] : await this.db.logicalSystem.findMany({ select: { id: true } });
+    const systems = await this.db.logicalSystem.findMany({
+      where: systemId ? { id: systemId } : undefined,
+      include: { devices: { include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } } },
+    });
     const deviceCodes: string[] = [];
     const systemCodes: string[] = [];
-    for (const { id } of systems) {
+    for (const preview of systems) {
+      const id = preview.id;
+      const previewDevices = preview.devices.map(device => {
+        const health = heartbeatHealth(device.health, device.heartbeats[0]?.recordedAt ?? null, device.createdAt, at, this.policy);
+        return { health, activationState: device.activationState, changed: health !== device.health };
+      });
+      if (!previewDevices.some(device => device.changed) && serviceAvailability(previewDevices) === preview.availability) continue;
       const changed = await this.db.$transaction(async transaction => {
         // Assignment writers lock the same row; the partial unique index remains the final guard.
         await transaction.$queryRaw`SELECT "id" FROM "LogicalSystem" WHERE "id" = ${id}::uuid FOR UPDATE`;
@@ -55,7 +64,7 @@ export class RedundancyManager {
         })));
         if (availability !== system.availability) await transaction.logicalSystem.update({ where: { id }, data: { availability } });
         return { code: system.code, changedCodes, changed: changedCodes.length > 0 || availability !== system.availability };
-      });
+      }, { maxWait: 15000, timeout: 30000 });
       deviceCodes.push(...changed.changedCodes);
       if (changed.changed) systemCodes.push(changed.code);
     }
@@ -89,7 +98,7 @@ export class RedundancyManager {
         detectedAt: at, completedAt: new Date(), durationMs: Math.max(0, Date.now() - started), simulated: true,
       } });
       return { event, codes: [primary.code, secondary.code], systemCode: system.code };
-    });
+    }, { maxWait: 15000, timeout: 30000 });
     this.onChange?.({ deviceCodes: result.codes, systemCodes: [result.systemCode], checkedAt: at.toISOString(), simulated: true });
     return result.event;
   }

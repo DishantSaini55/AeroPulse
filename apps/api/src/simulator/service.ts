@@ -48,7 +48,7 @@ export class TelemetrySimulator {
         await transaction.heartbeat.createMany({
           data: devices.filter(device => !this.pausedHeartbeats.has(device.code)).map((device) => ({ deviceId: device.id, recordedAt: at, simulated: true })),
         });
-      });
+      }, { maxWait: 15000, timeout: 30000 });
       try {
         this.onBatch?.({ recordedAt: at.toISOString(), deviceCodes: devices.map(device => device.code), simulated: true });
       } catch (error) {

@@ -6,17 +6,19 @@ import { AlarmService, type AlarmNotice } from './service.js';
 test('alarm creation is deduplicated, escalation stops after acknowledgement, recovery is informational', async () => {
   const start = new Date('2026-01-01T12:00:00.000Z');
   let diagnosisActive = true;
+  let outageActive = false;
   const diagnosis = { id: 'diagnosis-1', deviceId: 'device-1', severity: 'WARNING', suspectedCause: 'Possible cooling fault', serviceImpact: 'Active device at risk', detectedAt: start, device: { code: 'TEST-P', name: 'Test primary', system: { name: 'Test system' } } };
-  type Stored = { id: string; sourceKey: string; diagnosisId: string | null; deviceId: string; level: string; initialLevel: string; message: string; createdAt: Date; lastEscalatedAt: Date | null; resolvedAt: Date | null; acknowledgements: { userId: string }[]; device: { code: string; name: string } };
+  type Stored = { id: string; sourceKey: string; diagnosisId: string | null; deviceId: string; level: string; initialLevel: string; message: string; createdAt: Date; lastEscalatedAt: Date | null; resolvedAt: Date | null; acknowledgements: { userId: string }[]; device: { code: string; name: string; systemId: string } };
   const alarms: Stored[] = [];
   const notices: AlarmNotice[] = [];
   const db = {
     faultDiagnosis: { findMany: async () => diagnosisActive ? [diagnosis] : [] },
+    logicalSystem: { findMany: async () => outageActive ? [{ id: 'system-1', name: 'ILS', updatedAt: start, devices: [{ id: 'device-1', code: 'TEST-P', name: 'Test primary', activationState: 'ACTIVE' }] }] : [] },
     alarm: {
       findUnique: async ({ where }: { where: { sourceKey: string } }) => alarms.find(item => item.sourceKey === where.sourceKey) ?? null,
-      findMany: async () => alarms.filter(item => item.resolvedAt === null && item.diagnosisId !== null),
+      findMany: async ({ where }: { where: { sourceKey?: { startsWith: string } } }) => where.sourceKey ? alarms.filter(item => item.sourceKey.startsWith('outage:') && item.resolvedAt === null) : alarms.filter(item => item.resolvedAt === null && item.diagnosisId !== null),
       create: async ({ data }: { data: Omit<Stored, 'id' | 'acknowledgements' | 'device'> }) => {
-        const item = { ...data, diagnosisId: data.diagnosisId ?? null, lastEscalatedAt: data.lastEscalatedAt ?? null, resolvedAt: data.resolvedAt ?? null, id: `alarm-${alarms.length + 1}`, acknowledgements: [], device: { code: 'TEST-P', name: 'Test primary' } };
+        const item = { ...data, diagnosisId: data.diagnosisId ?? null, lastEscalatedAt: data.lastEscalatedAt ?? null, resolvedAt: data.resolvedAt ?? null, id: `alarm-${alarms.length + 1}`, acknowledgements: [], device: { code: 'TEST-P', name: 'Test primary', systemId: 'system-1' } };
         alarms.push(item); return item;
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<Stored> }) => Object.assign(alarms.find(item => item.id === where.id)!, data),
@@ -39,4 +41,11 @@ test('alarm creation is deduplicated, escalation stops after acknowledgement, re
   assert.equal(alarms[0]?.resolvedAt?.getTime(), start.getTime() + 35000);
   assert.equal(alarms[1]?.level, 'INFORMATION');
   assert.deepEqual(notices.map(item => item.level), ['WARNING', 'MAJOR', 'INFORMATION']);
+  outageActive = true;
+  await service.sync(new Date(start.getTime() + 40000));
+  await service.sync(new Date(start.getTime() + 45000));
+  assert.equal(alarms.filter(item => item.level === 'CRITICAL').length, 1);
+  outageActive = false;
+  await service.sync(new Date(start.getTime() + 50000));
+  assert.equal(alarms.filter(item => item.level === 'INFORMATION').length, 2);
 });

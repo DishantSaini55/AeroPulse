@@ -48,6 +48,30 @@ export class AlarmService {
           this.onNotice?.({ id: info.id, level: 'INFORMATION', message: info.message, deviceCode: alarm.device.code, createdAt: at.toISOString(), simulated: true });
         }
       }
+      const outages = await this.db.logicalSystem.findMany({ where: { availability: 'OUTAGE' }, include: { devices: { orderBy: { role: 'asc' }, select: { id: true, code: true, name: true, activationState: true } } } });
+      const outageSystems = new Set(outages.map(system => system.id));
+      for (const system of outages) {
+        const device = system.devices.find(item => item.activationState === 'ACTIVE') ?? system.devices[0];
+        if (!device) continue;
+        const sourceKey = `outage:${system.id}:${system.updatedAt.getTime()}`;
+        const existing = await this.db.alarm.findUnique({ where: { sourceKey } });
+        if (existing) continue;
+        const alarm = await this.db.alarm.create({ data: {
+          sourceKey, deviceId: device.id, level: 'CRITICAL', initialLevel: 'CRITICAL',
+          message: `Critical alert. Both ${system.name} devices are unavailable. Immediate maintenance attention required.`, createdAt: at, simulated: true,
+        } });
+        this.onNotice?.({ id: alarm.id, level: 'CRITICAL', message: alarm.message, deviceCode: device.code, createdAt: at.toISOString(), simulated: true });
+      }
+      const openOutages = await this.db.alarm.findMany({ where: { sourceKey: { startsWith: 'outage:' }, resolvedAt: null }, include: { device: { select: { code: true, name: true, systemId: true } } } });
+      for (const alarm of openOutages) {
+        if (outageSystems.has(alarm.device.systemId)) continue;
+        await this.db.alarm.update({ where: { id: alarm.id }, data: { resolvedAt: at } });
+        const info = await this.db.alarm.create({ data: {
+          sourceKey: `outage-recovery:${alarm.id}`, deviceId: alarm.deviceId, level: 'INFORMATION', initialLevel: 'INFORMATION',
+          message: `${alarm.device.name}: service outage cleared. Verify the equipment state.`, createdAt: at, resolvedAt: at, simulated: true,
+        } });
+        this.onNotice?.({ id: info.id, level: 'INFORMATION', message: info.message, deviceCode: alarm.device.code, createdAt: at.toISOString(), simulated: true });
+      }
     } finally { this.running = false; }
   }
 }

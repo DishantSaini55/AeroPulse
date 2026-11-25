@@ -73,6 +73,7 @@ export class IncidentService {
       const at = new Date();
       const updated = await tx.incident.update({ where: { id }, data: {
         status: next, assignedToId: next === 'ASSIGNED' ? assignedToId : undefined,
+        acknowledgedAt: next === 'ACKNOWLEDGED' ? at : undefined,
         repairStartedAt: next === 'UNDER_REPAIR' ? at : undefined,
         repairCompletedAt: next === 'VERIFICATION' ? at : undefined,
         resolvedAt: next === 'RESOLVED' ? at : undefined,

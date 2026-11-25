@@ -60,9 +60,9 @@ export type Weather = {
   };
 };
 
-async function getJson<T>(path: string, allowUnavailable = false): Promise<T> {
+async function getJson<T>(path: string, allowUnavailable = false, timeoutMs = 10000): Promise<T> {
   const token = getToken();
-  const response = await fetch(path, { signal: AbortSignal.timeout(10000), headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const response = await fetch(path, { signal: AbortSignal.timeout(timeoutMs), headers: token ? { authorization: `Bearer ${token}` } : {} });
   const result = await response.json();
   if (response.status === 401) window.dispatchEvent(new Event('aeropulse:unauthorized'));
   if (!response.ok && !(allowUnavailable && response.status === 503 && result?.source === 'AVIATION_WEATHER_CENTER')) {
@@ -140,6 +140,19 @@ export const getMaintenanceHistory = async (code: string) => (await getJson<{ da
 export type MaintenanceFilters = { device?: string; system?: string; from?: string; to?: string; severity?: string; rootCause?: string; page?: number };
 export const getMaintenanceRecords = async (filters: MaintenanceFilters) => (await getJson<{ data: Incident[]; total: number; page: number; limit: number }>(`/api/v1/maintenance?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString()}`));
 export const recordReplacement = (code: string, input: { oldUnitSerial: string; newUnitSerial: string; reason: string; cost: number; incidentId?: string }) => postAction(`/api/v1/maintenance/${encodeURIComponent(code)}/replacements`, input);
+
+export type ReliabilityReport = {
+  dataset: 'RECORDED' | 'HISTORICAL_DEMO'; from: string; to: string; deviceCount: number;
+  coverage: { diagnoses: number; mttdSamples: number; mttaSamples: number; mttrSamples: number; mtbfIntervals: number; observedEquipmentMs: number; observedServiceMs: number };
+  summary: { failureEpisodes: number; mttdMs: number | null; mttaMs: number | null; mttrMs: number | null; mtbfMs: number | null; equipmentAvailabilityPct: number | null; serviceAvailabilityPct: number | null; equipmentDowntimeMs: number; serviceDowntimeMs: number; recurringFaults: number; automaticFailovers: number; failoverSuccessPct: number | null; meanFailoverDurationMs: number | null; maintenanceCost: number };
+  dailyTrends: { date: string; failures: number; maintenanceCost: number }[]; monthlyTrends: { month: string; failures: number }[];
+  rootCauses: { label: string; count: number }[]; components: { label: string; count: number }[];
+  systems: { code: string; observedMs: number; downtimeMs: number; availabilityPct: number | null; outageCount: number }[];
+  devices: { code: string; systemCode: string; failureEpisodes: number; downtimeMs: number; observedMs: number; availabilityPct: number | null; recurringFaults: number; failuresPerObservedDay: number | null; maintenanceCost: number }[];
+};
+export const getReliability = async (dataset: 'recorded' | 'demo', days: 7 | 30 | 90) => getJson<{ data: ReliabilityReport; note: string; simulated: true }>(`/api/v1/analytics/reliability?dataset=${dataset}&days=${days}`, false, 20000);
+export type AnalyticsTelemetry = { device: string; bucket: 'UTC_HOUR' | 'UTC_DAY'; data: { bucket: string; temperatureC: number | null; cpuPercent: number | null; packetLossPct: number | null }[]; simulated: true };
+export const getAnalyticsTelemetry = (device: string, days: 7 | 30 | 90) => getJson<AnalyticsTelemetry>(`/api/v1/analytics/telemetry?device=${encodeURIComponent(device)}&days=${days}`, false, 20000);
 
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;

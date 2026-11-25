@@ -22,7 +22,7 @@ const auth = new AuthService(db, requireJwtSecret());
 const weather = new WeatherService(db);
 const heartbeatPolicy = heartbeatPolicyFromEnv();
 let io: ReturnType<typeof attachRealtime>;
-const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs);
+const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs, heartbeatPolicy.expectedIntervalMs);
 const alarms = new AlarmService(db, event => io.emit('alarm:raised', event));
 const incidents = new IncidentService(db, () => io.emit('incident:changed', { simulated: true }));
 const simulator = new TelemetrySimulator(db, 5000, event => {

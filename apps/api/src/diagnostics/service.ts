@@ -3,7 +3,7 @@ import { diagnose, diagnosticThresholds } from './rules.js';
 
 export class DiagnosisService {
   private running = false;
-  constructor(private readonly db: Database, private readonly heartbeatTimeoutMs: number) {}
+  constructor(private readonly db: Database, private readonly heartbeatTimeoutMs: number, private readonly heartbeatIntervalMs = 5000) {}
 
   async scan(at = new Date()) {
     if (this.running) return;
@@ -47,7 +47,9 @@ export class DiagnosisService {
             investigationSteps: finding.investigationSteps, recoveryAction: finding.recoveryAction, lastSeenAt: at,
           };
           if (previous) await this.db.faultDiagnosis.update({ where: { id: previous.id }, data });
-          else await this.db.faultDiagnosis.create({ data: { deviceId: device.id, ruleCode: finding.ruleCode, detectedAt: at, ...data } });
+          else await this.db.faultDiagnosis.create({ data: { deviceId: device.id, ruleCode: finding.ruleCode, detectedAt: at,
+            firstObservedAt: finding.ruleCode === 'MISSING_HEARTBEAT' ? new Date(lastHeartbeat.getTime() + this.heartbeatIntervalMs) : sample.recordedAt,
+            ...data } });
         }
       }
     } finally { this.running = false; }

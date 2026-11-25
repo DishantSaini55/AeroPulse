@@ -40,6 +40,7 @@ try {
   const path = `/api/v1/incidents/${incidentId}`;
   assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ASSIGNED', assignedToId: engineerId })).status, 409, 'cannot skip a lifecycle step');
   assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ACKNOWLEDGED' })).status, 200);
+  assert.ok((await db.incident.findUniqueOrThrow({ where: { id: incidentId } })).acknowledgedAt, 'acknowledgement timestamp is stored for MTTA');
   assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ASSIGNED', assignedToId: engineerId })).status, 403, 'engineer cannot assign');
   assert.equal((await post(`${path}/transition`, 'supervisor', { status: 'ASSIGNED', assignedToId: engineerId })).status, 200);
   assert.equal((await post(`${path}/transition`, 'engineer', { status: 'UNDER_INVESTIGATION' })).status, 200);

@@ -143,6 +143,7 @@ model FaultDiagnosis {
   investigationSteps Json
   recoveryAction     String    @db.VarChar(250)
   detectedAt         DateTime
+  firstObservedAt    DateTime?
   lastSeenAt         DateTime
   resolvedAt         DateTime?
   confirmedRootCause String?   @db.VarChar(500)
@@ -191,6 +192,7 @@ model Incident {
   approvedById  String?          @db.Uuid
   approvedBy    User?            @relation("IncidentApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt    DateTime?
+  acknowledgedAt DateTime?
   repairStartedAt DateTime?
   repairCompletedAt DateTime?
   resolvedAt    DateTime?

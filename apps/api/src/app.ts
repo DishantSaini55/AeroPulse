@@ -14,6 +14,8 @@ import type { Scenario } from './simulator/generator.js';
 import { escalationDelay } from './alarms/service.js';
 import { IncidentError, IncidentService } from './incidents/service.js';
 import { incidentRoutes } from './incidents/routes.js';
+import { calculateReliability } from './analytics/metrics.js';
+import { historicalDemoInput, recordedAnalyticsInput } from './analytics/source.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -39,6 +41,7 @@ const userUpdate = z.strictObject({
 export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator, incidents?: IncidentService) {
   const app = express();
   const notes = new Map<string, Note>();
+  const analyticsCache = new Map<string, { until: number; value: unknown }>();
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '16kb' }));
@@ -434,6 +437,36 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     const note: Note = { id: randomUUID(), ...parsed.data, createdAt: new Date().toISOString() };
     notes.set(note.id, note);
     response.status(201).location(`/api/v1/notes/${note.id}`).json({ data: note, simulated: true });
+  });
+
+  app.get('/api/v1/analytics/telemetry', async (request, response) => {
+    if (!db) { response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Telemetry requires PostgreSQL' } }); return; }
+    const input = z.strictObject({ device: z.string().min(1).max(48), days: z.coerce.number().int().refine(value => [7, 30, 90].includes(value)).default(7) }).safeParse(request.query);
+    if (!input.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Choose a device and a 7, 30 or 90 day window' } }); return; }
+    const device = await db.device.findUnique({ where: { code: input.data.device }, select: { id: true, code: true } });
+    if (!device) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } }); return; }
+    const from = new Date(Date.now() - input.data.days * 86_400_000);
+    type Row = { bucket: Date; temperatureC: number | null; cpuPercent: number | null; packetLossPct: number | null };
+    const data = input.data.days === 90
+      ? await db.$queryRaw<Row[]>`SELECT date_trunc('day', "recordedAt") AS "bucket", AVG("temperatureC") AS "temperatureC", AVG("cpuPercent") AS "cpuPercent", AVG("packetLossPct") AS "packetLossPct" FROM "TelemetryReading" WHERE "deviceId" = ${device.id}::uuid AND "recordedAt" >= ${from} GROUP BY 1 ORDER BY 1 ASC`
+      : await db.$queryRaw<Row[]>`SELECT date_trunc('hour', "recordedAt") AS "bucket", AVG("temperatureC") AS "temperatureC", AVG("cpuPercent") AS "cpuPercent", AVG("packetLossPct") AS "packetLossPct" FROM "TelemetryReading" WHERE "deviceId" = ${device.id}::uuid AND "recordedAt" >= ${from} GROUP BY 1 ORDER BY 1 ASC`;
+    response.json({ device: device.code, bucket: input.data.days === 90 ? 'UTC_DAY' : 'UTC_HOUR', data, simulated: true });
+  });
+
+  app.get('/api/v1/analytics/reliability', async (request, response) => {
+    const input = z.strictObject({ dataset: z.enum(['recorded', 'demo']).default('recorded'), days: z.coerce.number().int().refine(value => [7, 30, 90].includes(value)).default(30) }).safeParse(request.query);
+    if (!input.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Choose recorded or demo data and a 7, 30 or 90 day window' } }); return; }
+    if (input.data.dataset === 'recorded' && !db) { response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Recorded analytics require PostgreSQL' } }); return; }
+    const key = `${input.data.dataset}:${input.data.days}`;
+    const cached = analyticsCache.get(key);
+    if (cached && cached.until > Date.now()) { response.json(cached.value); return; }
+    const to = new Date();
+    const from = new Date(to.getTime() - input.data.days * 86_400_000);
+    const source = input.data.dataset === 'demo' ? historicalDemoInput(to) : await recordedAnalyticsInput(db!, from, to, heartbeatPolicy.expectedIntervalMs);
+    const result = { data: calculateReliability(source, from, to, input.data.dataset === 'demo' ? 'HISTORICAL_DEMO' : 'RECORDED'), simulated: true,
+      note: input.data.dataset === 'demo' ? 'Illustrative historical demo events generated for this dashboard. Not observed project performance.' : 'Calculated from persisted simulation records in the selected window.' };
+    analyticsCache.set(key, { until: Date.now() + 30_000, value: result });
+    response.json(result);
   });
 
   if (db) app.use('/api/v1', incidentRoutes(db, incidents ?? new IncidentService(db)));

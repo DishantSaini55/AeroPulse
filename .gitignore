@@ -33,6 +33,7 @@ Thumbs.db
 
 # Prisma generated artefacts are reproducible
 src/generated/prisma/
+apps/api/src/generated/
 
 # Local learning and planning notes (not part of the public project)
 /docs/

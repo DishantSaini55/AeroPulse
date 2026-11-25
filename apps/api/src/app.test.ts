@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { Server } from 'node:http';
 import { createApp } from './app.js';
+import { createDb } from './db.js';
 
 let server: Server;
 let baseUrl: string;
@@ -51,4 +52,28 @@ test('invalid input, unknown note and malformed JSON return JSON errors', async 
   });
   assert.equal(malformed.status, 400);
   assert.equal((await malformed.json() as { error: { code: string } }).error.code, 'INVALID_JSON');
+});
+
+test('database asset registry returns ten systems and twenty devices', { skip: !process.env.DATABASE_URL }, async () => {
+  const db = createDb();
+  await db.$connect();
+  const assetServer = createApp(db).listen(0);
+  try {
+    await new Promise<void>((resolve) => assetServer.once('listening', resolve));
+    const address = assetServer.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const url = `http://127.0.0.1:${address.port}`;
+    const response = await fetch(`${url}/api/v1/systems`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { data: Array<{ code: string; devices: unknown[] }> };
+    assert.equal(body.data.length, 10);
+    assert.equal(body.data.reduce((sum, system) => sum + system.devices.length, 0), 20);
+    const radar = await fetch(`${url}/api/v1/systems/RADAR`);
+    assert.equal(radar.status, 200);
+    assert.equal((await radar.json() as { data: { devices: unknown[] } }).data.devices.length, 2);
+    assert.equal((await fetch(`${url}/api/v1/systems/UNKNOWN`)).status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => assetServer.close((error) => error ? reject(error) : resolve()));
+    await db.$disconnect();
+  }
 });

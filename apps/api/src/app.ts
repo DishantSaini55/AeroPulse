@@ -1,6 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type { Database } from './db.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -10,7 +11,7 @@ const noteInput = z.strictObject({
 type Note = z.infer<typeof noteInput> & { id: string; createdAt: string };
 
 // Each app instance owns its own temporary data until Phase 3 adds PostgreSQL.
-export function createApp() {
+export function createApp(db?: Database) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -19,6 +20,34 @@ export function createApp() {
 
   app.get('/api/v1/health', (_request, response) => {
     response.json({ status: 'ok', service: 'aeropulse-api' });
+  });
+
+  app.get('/api/v1/systems', async (_request, response) => {
+    if (!db) {
+      response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
+      return;
+    }
+    const systems = await db.logicalSystem.findMany({
+      orderBy: { code: 'asc' },
+      include: { devices: { orderBy: { role: 'asc' } } },
+    });
+    response.json({ data: systems, simulated: true });
+  });
+
+  app.get('/api/v1/systems/:code', async (request, response) => {
+    if (!db) {
+      response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
+      return;
+    }
+    const system = await db.logicalSystem.findUnique({
+      where: { code: String(request.params.code).toUpperCase() },
+      include: { devices: { orderBy: { role: 'asc' } } },
+    });
+    if (!system) {
+      response.status(404).json({ error: { code: 'NOT_FOUND', message: 'System not found' } });
+      return;
+    }
+    response.json({ data: system, simulated: true });
   });
 
   app.get('/api/v1/notes', (_request, response) => {

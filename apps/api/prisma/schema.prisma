@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DeviceRole {
+  PRIMARY
+  SECONDARY
+}
+
+enum DeviceHealth {
+  HEALTHY
+  DEGRADED
+  UNAVAILABLE
+  RECOVERING
+}
+
+enum ActivationState {
+  ACTIVE
+  STANDBY
+  INELIGIBLE
+}
+
+enum ServiceAvailability {
+  AVAILABLE
+  DEGRADED
+  OUTAGE
+}
+
+model LogicalSystem {
+  id           String              @id @default(uuid()) @db.Uuid
+  code         String              @unique @db.VarChar(32)
+  name         String              @unique @db.VarChar(100)
+  availability ServiceAvailability @default(AVAILABLE)
+  devices      Device[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model Device {
+  id              String          @id @default(uuid()) @db.Uuid
+  code            String          @unique @db.VarChar(48)
+  name            String          @db.VarChar(120)
+  systemId        String          @db.Uuid
+  system          LogicalSystem   @relation(fields: [systemId], references: [id], onDelete: Restrict)
+  role            DeviceRole
+  health          DeviceHealth    @default(HEALTHY)
+  activationState ActivationState @default(STANDBY)
+  commissionedAt  DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([systemId, role])
+  @@index([systemId, activationState])
+}

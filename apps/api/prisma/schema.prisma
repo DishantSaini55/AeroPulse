@@ -92,3 +92,21 @@ model Heartbeat {
   @@index([deviceId, recordedAt(sort: Desc)])
   @@index([recordedAt])
 }
+
+model WeatherObservation {
+  id                String   @id @default(uuid()) @db.Uuid
+  station           String   @db.VarChar(4)
+  observedAt        DateTime
+  fetchedAt         DateTime
+  rawMetar          String   @db.Text
+  temperatureC      Float?
+  dewPointC         Float?
+  visibilityMiles   Float?
+  windSpeedKnots    Float?
+  windDirectionDeg  Int?
+  pressureHpa       Float?
+  conditions        String?  @db.VarChar(120)
+
+  @@unique([station, observedAt])
+  @@index([station, fetchedAt(sort: Desc)])
+}

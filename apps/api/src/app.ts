@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Database } from './db.js';
+import type { WeatherService } from './weather/service.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -11,7 +12,7 @@ const noteInput = z.strictObject({
 type Note = z.infer<typeof noteInput> & { id: string; createdAt: string };
 
 // Each app instance owns its own temporary data until Phase 3 adds PostgreSQL.
-export function createApp(db?: Database) {
+export function createApp(db?: Database, weather?: WeatherService) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -20,6 +21,15 @@ export function createApp(db?: Database) {
 
   app.get('/api/v1/health', (_request, response) => {
     response.json({ status: 'ok', service: 'aeropulse-api' });
+  });
+
+  app.get('/api/v1/weather/vidp', async (_request, response) => {
+    if (!weather) {
+      response.status(503).json({ error: { code: 'WEATHER_UNAVAILABLE', message: 'Weather service not configured' } });
+      return;
+    }
+    const result = await weather.getCurrent();
+    response.status(result.data ? 200 : 503).json(result);
   });
 
   app.get('/api/v1/systems', async (_request, response) => {

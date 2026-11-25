@@ -46,6 +46,9 @@ services:
       JWT_SECRET: ${AEROPULSE_JWT_SECRET:?Set AEROPULSE_JWT_SECRET in your shell or .env file}
       INSTANCE_ID: api-a
       PORT: 4000
+      NODE_ENV: production
+      LOG_FORMAT: json
+      TELEMETRY_RETENTION_DAYS: 90
     depends_on:
       migrate:
         condition: service_completed_successfully

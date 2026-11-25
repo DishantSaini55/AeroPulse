@@ -11,6 +11,7 @@ import { DiagnosisService } from './diagnostics/service.js';
 import { AlarmService } from './alarms/service.js';
 import { IncidentService } from './incidents/service.js';
 import { startLeadership } from './cluster/leader.js';
+import { RetentionService, telemetryRetentionDays } from './retention.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -22,6 +23,7 @@ await db.$connect();
 const auth = new AuthService(db, requireJwtSecret());
 const weather = new WeatherService(db);
 const heartbeatPolicy = heartbeatPolicyFromEnv();
+const retention = new RetentionService(db, telemetryRetentionDays());
 let io: ReturnType<typeof attachRealtime>;
 let cluster: Awaited<ReturnType<typeof attachRedisRealtime>>;
 const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs, heartbeatPolicy.expectedIntervalMs);
@@ -54,11 +56,12 @@ async function startLeaderJobs() {
   simulator.start();
   redundancyManager.start();
   weather.start();
+  retention.start();
 }
 async function stopLeaderJobs() {
   if (!jobsRunning) return;
   jobsRunning = false;
-  await Promise.all([simulator.stop(), redundancyManager.stop(), weather.stop()]);
+  await Promise.all([simulator.stop(), redundancyManager.stop(), weather.stop(), retention.stop()]);
   console.log(`AeroPulse instance ${process.env.INSTANCE_ID ?? 'local'} stopped background jobs`);
 }
 const leadership = await startLeadership(process.env.REDIS_URL, { onLeader: startLeaderJobs, onFollower: stopLeaderJobs });

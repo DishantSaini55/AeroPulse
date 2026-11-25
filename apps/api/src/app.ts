@@ -19,6 +19,7 @@ import { historicalDemoInput, recordedAnalyticsInput } from './analytics/source.
 import { recommendationRoutes } from './recommendations/routes.js';
 import { auditMutations } from './reports/audit.js';
 import { reportRoutes } from './reports/routes.js';
+import { requestLogger, securityHeaders } from './observability.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -47,6 +48,9 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   const analyticsCache = new Map<string, { until: number; value: unknown }>();
 
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);
+  app.use(securityHeaders());
+  app.use(requestLogger());
   app.use(express.json({ limit: '16kb' }));
 
   app.get('/api/v1/health', (_request, response) => {
@@ -87,6 +91,8 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     next();
   };
   app.use('/api/v1', requireAuth);
+  app.use('/api/v1', rateLimit({ windowMs: 15 * 60_000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false,
+    skip: request => !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) }));
   if (db) app.use('/api/v1', auditMutations(db));
 
   const requireRole = (...roles: UserRole[]): RequestHandler => (_request, response, next) => {

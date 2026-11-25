@@ -105,6 +105,7 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (alarmId) { await db.alarmAcknowledgement.deleteMany({ where: { alarmId } }); await db.alarm.delete({ where: { id: alarmId } }); }
     if (diagnosisId) await db.faultDiagnosis.delete({ where: { id: diagnosisId } });
+    await db.auditEvent.deleteMany({ where: { actorId: { in: createdIds } } });
     await db.user.deleteMany({ where: { id: { in: createdIds } } });
     await db.$disconnect();
   }

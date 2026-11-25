@@ -9,6 +9,8 @@ import type { UserRole } from './generated/prisma/enums.js';
 import { heartbeatPolicyFromEnv, type HeartbeatPolicy } from './heartbeat/monitor.js';
 import { FailbackError, type RedundancyManager } from './failover/manager.js';
 import type { TelemetrySimulator } from './simulator/service.js';
+import { diagnosticThresholds } from './diagnostics/rules.js';
+import type { Scenario } from './simulator/generator.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -261,6 +263,67 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     }
     simulator.setHeartbeatPaused(code, parsed.data.paused);
     response.json({ data: { code, heartbeatPaused: parsed.data.paused }, simulated: true });
+  });
+
+  app.get('/api/v1/simulation/devices', requireRole('ADMINISTRATOR'), async (_request, response) => {
+    if (!db || !simulator) { response.status(503).json({ error: { code: 'SIMULATOR_UNAVAILABLE' } }); return; }
+    const devices = await db.device.findMany({ orderBy: { code: 'asc' }, select: { code: true, name: true, role: true, system: { select: { code: true, name: true } } } });
+    response.json({ data: devices.map(device => ({ ...device, scenario: simulator.getScenario(device.code), heartbeatPaused: simulator.isHeartbeatPaused(device.code) })), simulated: true });
+  });
+
+  app.post('/api/v1/simulation/devices/:code/scenario', requireRole('ADMINISTRATOR'), async (request, response) => {
+    if (!db || !simulator) { response.status(503).json({ error: { code: 'SIMULATOR_UNAVAILABLE' } }); return; }
+    const scenario = z.enum(['NORMAL', 'DEGRADATION', 'FAILURE', 'RECOVERY', 'OVERHEATING', 'FAN_FAILURE', 'CPU_OVERLOAD', 'MEMORY_OVERLOAD', 'DISK_EXHAUSTION', 'NETWORK_DISCONNECTION', 'PACKET_LOSS', 'POWER_FAILURE', 'MISSING_HEARTBEAT']).safeParse(request.body?.scenario);
+    if (!scenario.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid scenario' } }); return; }
+    const code = String(request.params.code).toUpperCase();
+    const device = await db.device.findUnique({ where: { code }, select: { id: true, system: { select: { code: true } } } });
+    if (!device) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } }); return; }
+    const compute = ['AMSS', 'AUTOMATION', 'ASMGCS'].includes(device.system.code);
+    const network = !['UPS', 'COOLING'].includes(device.system.code);
+    if ((['CPU_OVERLOAD', 'MEMORY_OVERLOAD', 'DISK_EXHAUSTION'].includes(scenario.data) && !compute) || (['PACKET_LOSS', 'NETWORK_DISCONNECTION'].includes(scenario.data) && !network) || (scenario.data === 'POWER_FAILURE' && device.system.code !== 'UPS')) {
+      response.status(409).json({ error: { code: 'SCENARIO_NOT_SUPPORTED', message: 'This scenario is not supported by this device type' } }); return;
+    }
+    simulator.setScenario(code, scenario.data as Scenario);
+    response.json({ data: { code, scenario: scenario.data }, simulated: true });
+  });
+
+  app.post('/api/v1/simulation/systems/:code/scenario', requireRole('ADMINISTRATOR'), async (request, response) => {
+    if (!db || !simulator) { response.status(503).json({ error: { code: 'SIMULATOR_UNAVAILABLE' } }); return; }
+    const scenario = z.enum(['NORMAL', 'RECOVERY', 'MISSING_HEARTBEAT', 'NETWORK_DISCONNECTION']).safeParse(request.body?.scenario);
+    if (!scenario.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid shared scenario' } }); return; }
+    const code = String(request.params.code).toUpperCase();
+    const system = await db.logicalSystem.findUnique({ where: { code }, include: { devices: { select: { code: true } } } });
+    if (!system) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'System not found' } }); return; }
+    if (scenario.data === 'NETWORK_DISCONNECTION' && ['UPS', 'COOLING'].includes(code)) { response.status(409).json({ error: { code: 'SCENARIO_NOT_SUPPORTED', message: 'Network scenario is not supported by this system' } }); return; }
+    for (const device of system.devices) simulator.setScenario(device.code, scenario.data);
+    response.json({ data: { code, scenario: scenario.data, deviceCodes: system.devices.map(device => device.code) }, simulated: true });
+  });
+
+  app.get('/api/v1/diagnoses', async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), active: z.enum(['true', 'false']).optional() }).safeParse(request.query);
+    if (!parsed.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid diagnosis query' } }); return; }
+    const data = await db.faultDiagnosis.findMany({
+      where: parsed.data.active === 'true' ? { resolvedAt: null } : parsed.data.active === 'false' ? { resolvedAt: { not: null } } : undefined,
+      take: parsed.data.limit, orderBy: { detectedAt: 'desc' },
+      include: { device: { select: { code: true, name: true, system: { select: { code: true, name: true, availability: true } } } }, confirmedBy: { select: { name: true } } },
+    });
+    const enriched = await Promise.all(data.map(async item => ({
+      ...item,
+      previousSimilarFailures: await db.faultDiagnosis.count({ where: { deviceId: item.deviceId, ruleCode: item.ruleCode, detectedAt: { lt: item.detectedAt } } }),
+    })));
+    response.json({ data: enriched, thresholds: diagnosticThresholds(), simulated: true });
+  });
+
+  app.patch('/api/v1/diagnoses/:id/confirm', requireRole('ADMINISTRATOR', 'SUPERVISOR', 'MAINTENANCE_ENGINEER'), async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = z.strictObject({ rootCause: z.string().trim().min(5).max(500) }).safeParse(request.body);
+    if (!parsed.success || !z.uuid().safeParse(request.params.id).success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Valid root cause is required' } }); return; }
+    const id = String(request.params.id);
+    const existing = await db.faultDiagnosis.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Diagnosis not found' } }); return; }
+    const data = await db.faultDiagnosis.update({ where: { id }, data: { confirmedRootCause: parsed.data.rootCause, confirmedById: (response.locals.user as PublicUser).id, confirmedAt: new Date() } });
+    response.json({ data, simulated: true });
   });
 
   app.get('/api/v1/monitoring/snapshot', async (_request, response) => {

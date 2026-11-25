@@ -18,10 +18,12 @@ export class TelemetrySimulator {
     private readonly onBatch?: (event: TelemetryBatchEvent) => void,
   ) {}
 
-  // Internal scenario hook; administrator controls will be added in Phase 11.
   setScenario(deviceCode: string, scenario: Scenario) {
     this.scenarios.set(deviceCode, scenario);
+    this.setHeartbeatPaused(deviceCode, scenario === 'MISSING_HEARTBEAT' || scenario === 'NETWORK_DISCONNECTION');
   }
+
+  getScenario(deviceCode: string): Scenario { return this.scenarios.get(deviceCode) ?? 'NORMAL'; }
 
   setHeartbeatPaused(deviceCode: string, paused: boolean) {
     if (paused) this.pausedHeartbeats.add(deviceCode);

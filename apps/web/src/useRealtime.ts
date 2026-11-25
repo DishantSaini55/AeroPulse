@@ -29,11 +29,13 @@ export function useRealtime() {
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['history'] });
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
+      void queryClient.invalidateQueries({ queryKey: ['diagnoses'] });
     };
     const onStatus = () => {
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
       void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
+      void queryClient.invalidateQueries({ queryKey: ['diagnoses'] });
     };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);

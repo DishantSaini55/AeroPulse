@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, and cached real VIDP METAR observations. A React operations console provides an overview, infrastructure table, redundancy view, device history charts, aviation weather view and live telemetry event console. Socket.IO broadcasts telemetry batches after database commit and status changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators can manage users, pause simulated heartbeats and create temporary operations notes; supervisors can perform failback; maintenance engineers have read access.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, simulation laboratory, device history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches after database commit and status changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can perform failback; engineers can record confirmed root causes.
 
 ## API
 
@@ -21,6 +21,11 @@ The current implementation includes a TypeScript Express API, PostgreSQL/Prisma 
 | GET | `/api/v1/failover-events` | Recent durable failover/failback attempts, up to 100 |
 | POST | `/api/v1/systems/:code/failback` | Restore a recovered primary (administrator or supervisor) |
 | POST | `/api/v1/simulation/devices/:code/heartbeat` | Pause or resume a simulated heartbeat (administrator) |
+| GET | `/api/v1/diagnoses` | Suspected faults, evidence, history and configurable thresholds |
+| PATCH | `/api/v1/diagnoses/:id/confirm` | Record a verified root cause |
+| GET | `/api/v1/simulation/devices` | List current local simulation scenarios (administrator) |
+| POST | `/api/v1/simulation/devices/:code/scenario` | Inject a device scenario (administrator) |
+| POST | `/api/v1/simulation/systems/:code/scenario` | Inject a correlated system scenario (administrator) |
 | GET | `/api/v1/devices/:code/telemetry` | Paginated telemetry history and latest heartbeat |
 | GET | `/api/v1/weather/vidp` | Real VIDP METAR observation with cache and freshness state |
 | GET | `/api/v1/notes` | List simulated operations notes |
@@ -32,6 +37,8 @@ All endpoints except health and login require `Authorization: Bearer <token>`. T
 Telemetry history accepts `page` (default `1`) and `limit` (default `20`, maximum `100`). The simulator's default scenario is normal operation; its internal generator also supports gradual degradation, failure and recovery for future administrator-controlled simulation. The simulator currently runs in one API process. Multi-instance coordination and telemetry retention are planned for later infrastructure work.
 
 The redundancy manager checks every five seconds. By default, a device becomes unavailable after three missed expected five-second heartbeats; set `HEARTBEAT_MISSED_LIMIT` (1–12) to change the threshold. On active-device failure it activates a healthy standby in a database transaction. If neither device is healthy, service availability becomes `OUTAGE`. A recovered primary remains inactive until an administrator or supervisor requests failback. Each attempt records its result and duration. The database locks each system row during assignment changes and enforces at most one active device per system with a partial unique index.
+
+The diagnostic engine evaluates persisted simulated telemetry and heartbeat recency. Rules cover thermal stress, cooling fan symptoms, resource overload, memory pressure, storage pressure, network degradation, low voltage, missing heartbeat and correlated problems across both devices. Findings contain supporting measurements, suspected cause, severity, service impact and investigation steps. An engineer can separately record a confirmed root cause. Active findings are deduplicated per device and rule; resolved findings remain in history. Thresholds are configurable through the `DIAG_*` variables in `.env.example`. Injection names are never passed to the diagnostic rules.
 
 The weather response is labelled `simulated: false` and includes observation and fetch timestamps, temperature (°C), dew point (°C), visibility (statute miles), wind speed (knots), wind direction (degrees), pressure (hPa), conditions and raw METAR when available. A cached observation may be returned with `stale: true` after an upstream error; without an observation the endpoint returns `503`. The Aviation Weather Center is an external source and may be unavailable.
 
@@ -59,7 +66,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-Open `http://127.0.0.1:5173/` and sign in. Vite proxies `/api` and `/socket.io` to the backend on port 4000. The Redundancy page shows heartbeat recency, active assignment, standby readiness and event history. Administrators can pause an active device's simulated heartbeat to demonstrate failover, then resume it; supervisors and administrators can request failback after primary recovery. Paused-heartbeat controls are local to this single API process and reset when it restarts. Administrators also see User management. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry and status events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API. The browser keeps the JWT in session storage, which clears when its tab session ends.
+Open `http://127.0.0.1:5173/` and sign in. Vite proxies `/api` and `/socket.io` to the backend on port 4000. The Redundancy page shows heartbeat recency, active assignment, standby readiness and event history. Administrators can pause an active device's simulated heartbeat to demonstrate failover, then resume it; supervisors and administrators can request failback after primary recovery. Fault Diagnostics shows suspected causes and lets users record investigation results. Administrators can inject device or system scenarios in Simulation Laboratory. Scenario controls are local to this single API process and reset when it restarts. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry and status events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API. The browser keeps the JWT in session storage, which clears when its tab session ends.
 
 With both servers running, set `REALTIME_TOKEN` to a valid token from `POST /api/v1/auth/login`, then run `npm.cmd run check:realtime` from `apps/web` to verify a telemetry batch through the Vite websocket proxy.
 

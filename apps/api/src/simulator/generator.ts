@@ -1,16 +1,16 @@
-export type Scenario = 'NORMAL' | 'DEGRADATION' | 'FAILURE' | 'RECOVERY';
+export type Scenario = 'NORMAL' | 'DEGRADATION' | 'FAILURE' | 'RECOVERY' | 'OVERHEATING' | 'FAN_FAILURE' | 'CPU_OVERLOAD' | 'MEMORY_OVERLOAD' | 'DISK_EXHAUSTION' | 'NETWORK_DISCONNECTION' | 'PACKET_LOSS' | 'POWER_FAILURE' | 'MISSING_HEARTBEAT';
 export type Metrics = {
-  temperatureC?: number;
-  cpuPercent?: number;
-  memoryPercent?: number;
-  diskPercent?: number;
-  latencyMs?: number;
-  packetLossPct?: number;
-  voltageV?: number;
-  currentA?: number;
-  fanRpm?: number;
-  batteryPct?: number;
-  signalPct?: number;
+  temperatureC?: number | null;
+  cpuPercent?: number | null;
+  memoryPercent?: number | null;
+  diskPercent?: number | null;
+  latencyMs?: number | null;
+  packetLossPct?: number | null;
+  voltageV?: number | null;
+  currentA?: number | null;
+  fanRpm?: number | null;
+  batteryPct?: number | null;
+  signalPct?: number | null;
 };
 
 type DeviceState = { stress: number; drift: number; last: Metrics };
@@ -48,7 +48,7 @@ export class TelemetryGenerator {
 
   next(code: string, scenario: Scenario = 'NORMAL'): Metrics {
     const state = this.states.get(code) ?? { stress: 0, drift: 0, last: {} };
-    const target = scenario === 'FAILURE' ? 1 : scenario === 'DEGRADATION' ? 0.55 : 0;
+    const target = scenario === 'FAILURE' ? 1 : scenario === 'DEGRADATION' ? 0.55 : scenario === 'NORMAL' || scenario === 'RECOVERY' ? 0 : 0.35;
     const rate = scenario === 'RECOVERY' ? 0.35 : 0.22;
     state.stress += (target - state.stress) * rate;
     state.drift = clamp(state.drift + this.noise(code) * 0.8, -2, 2);
@@ -83,6 +83,13 @@ export class TelemetryGenerator {
     if (p.signal) {
       metrics.signalPct = smooth('signalPct', 96 - 82 * stress + jitter(), 0, 100);
     }
+    if (scenario === 'OVERHEATING' || scenario === 'FAN_FAILURE') metrics.temperatureC = smooth('temperatureC', 88, 0, 110);
+    if (scenario === 'FAN_FAILURE') metrics.fanRpm = smooth('fanRpm', 300, 0, 4000);
+    if (scenario === 'CPU_OVERLOAD' && p.compute) { metrics.cpuPercent = smooth('cpuPercent', 96, 0, 100); metrics.memoryPercent = smooth('memoryPercent', 91, 0, 100); }
+    if (scenario === 'MEMORY_OVERLOAD' && p.compute) metrics.memoryPercent = smooth('memoryPercent', 96, 0, 100);
+    if (scenario === 'DISK_EXHAUSTION' && p.compute) metrics.diskPercent = smooth('diskPercent', 97, 0, 100);
+    if ((scenario === 'NETWORK_DISCONNECTION' || scenario === 'PACKET_LOSS') && p.network) { metrics.latencyMs = smooth('latencyMs', 260, 0, 1000); metrics.packetLossPct = smooth('packetLossPct', 55, 0, 100); }
+    if (scenario === 'POWER_FAILURE' && p.power) metrics.voltageV = smooth('voltageV', 150, 0, 300);
     state.last = metrics;
     this.states.set(code, state);
     return metrics;

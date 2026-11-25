@@ -6,6 +6,8 @@ import { SignJWT } from 'jose';
 import { createApp } from './app.js';
 import { AuthService } from './auth.js';
 import { createDb } from './db.js';
+import { TelemetrySimulator } from './simulator/service.js';
+import { heartbeatPolicyFromEnv } from './heartbeat/monitor.js';
 
 const secret = 'test-only-secret-that-is-more-than-32-bytes-long';
 const password = 'TestPassword-Strong-123!';
@@ -16,8 +18,10 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
   const admin = await db.user.create({ data: { email: `admin-${suffix}@example.test`, name: 'Test Admin', role: 'ADMINISTRATOR', passwordHash: await bcrypt.hash(password, 10) } });
   const engineer = await db.user.create({ data: { email: `engineer-${suffix}@example.test`, name: 'Test Engineer', role: 'MAINTENANCE_ENGINEER', passwordHash: await bcrypt.hash(password, 10) } });
   const createdIds = [admin.id, engineer.id];
+  let diagnosisId: string | undefined;
   const auth = new AuthService(db, secret);
-  const server = createApp(db, undefined, auth).listen(0);
+  const simulator = new TelemetrySimulator(db);
+  const server = createApp(db, undefined, auth, undefined, heartbeatPolicyFromEnv(), undefined, simulator).listen(0);
   try {
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address();
@@ -49,6 +53,22 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     assert.equal((await fetch(`${url}/api/v1/systems/RADAR/failback`, { method: 'POST', headers: engineerHeaders })).status, 403);
     assert.equal((await fetch(`${url}/api/v1/simulation/devices/RADAR-P/heartbeat`, { method: 'POST', headers: { ...engineerHeaders, 'content-type': 'application/json' }, body: '{"paused":true}' })).status, 403);
     assert.equal((await fetch(`${url}/api/v1/failover-events`, { headers: engineerHeaders })).status, 200);
+    assert.equal((await fetch(`${url}/api/v1/simulation/devices`, { headers: engineerHeaders })).status, 403);
+    const inject = await fetch(`${url}/api/v1/simulation/devices/RADAR-P/scenario`, { method: 'POST', headers: { ...adminHeaders, 'content-type': 'application/json' }, body: '{"scenario":"FAN_FAILURE"}' });
+    assert.equal(inject.status, 200);
+    assert.equal(simulator.getScenario('RADAR-P'), 'FAN_FAILURE');
+    assert.equal((await fetch(`${url}/api/v1/simulation/devices/RADAR-P/scenario`, { method: 'POST', headers: { ...engineerHeaders, 'content-type': 'application/json' }, body: '{"scenario":"NORMAL"}' })).status, 403);
+    const radar = await db.device.findUniqueOrThrow({ where: { code: 'RADAR-P' } });
+    const finding = await db.faultDiagnosis.create({ data: {
+      deviceId: radar.id, ruleCode: `TEST-${suffix}`, suspectedCause: 'Test suspected cause', component: 'Test component', severity: 'WARNING',
+      symptoms: ['Test symptom'], supportingTelemetry: { temperatureC: 80 }, serviceImpact: 'Test impact',
+      investigationSteps: ['Test inspection'], recoveryAction: 'No action', detectedAt: new Date(), lastSeenAt: new Date(),
+    } });
+    diagnosisId = finding.id;
+    const confirm = await fetch(`${url}/api/v1/diagnoses/${finding.id}/confirm`, { method: 'PATCH', headers: { ...engineerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ rootCause: 'Verified test cause' }) });
+    assert.equal(confirm.status, 200);
+    assert.equal((await db.faultDiagnosis.findUniqueOrThrow({ where: { id: finding.id } })).confirmedById, engineer.id);
+    assert.equal((await fetch(`${url}/api/v1/diagnoses?active=true`, { headers: engineerHeaders })).status, 200);
     assert.equal((await fetch(`${url}/api/v1/users`, { headers: adminHeaders })).status, 200);
     const created = await fetch(`${url}/api/v1/users`, {
       method: 'POST', headers: { ...adminHeaders, 'content-type': 'application/json' },
@@ -76,6 +96,7 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     assert.equal(await auth.verifyToken(expired), null);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (diagnosisId) await db.faultDiagnosis.delete({ where: { id: diagnosisId } });
     await db.user.deleteMany({ where: { id: { in: createdIds } } });
     await db.$disconnect();
   }

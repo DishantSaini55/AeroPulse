@@ -99,6 +99,20 @@ async function postAction(path: string, body: unknown) {
 export const setHeartbeatPaused = (code: string, paused: boolean) => postAction(`/api/v1/simulation/devices/${encodeURIComponent(code)}/heartbeat`, { paused });
 export const requestFailback = (systemCode: string) => postAction(`/api/v1/systems/${encodeURIComponent(systemCode)}/failback`, {});
 
+export type Diagnosis = { id: string; ruleCode: string; suspectedCause: string; component: string; severity: string; symptoms: string[]; supportingTelemetry: Record<string, number>; serviceImpact: string; investigationSteps: string[]; recoveryAction: string; detectedAt: string; lastSeenAt: string; resolvedAt: string | null; confirmedRootCause: string | null; confirmedAt: string | null; confirmedBy: { name: string } | null; previousSimilarFailures: number; device: { code: string; name: string; system: { code: string; name: string; availability: string } } };
+export const getDiagnoses = async (active: 'all' | 'true' | 'false') => (await getJson<{ data: Diagnosis[] }>(`/api/v1/diagnoses?limit=100${active === 'all' ? '' : `&active=${active}`}`)).data;
+export type SimulatedDevice = { code: string; name: string; role: string; system: { code: string; name: string }; scenario: string; heartbeatPaused: boolean };
+export const getSimulationDevices = async () => (await getJson<{ data: SimulatedDevice[] }>('/api/v1/simulation/devices')).data;
+export const setDeviceScenario = (code: string, scenario: string) => postAction(`/api/v1/simulation/devices/${encodeURIComponent(code)}/scenario`, { scenario });
+export const setSystemScenario = (code: string, scenario: string) => postAction(`/api/v1/simulation/systems/${encodeURIComponent(code)}/scenario`, { scenario });
+export async function confirmDiagnosis(id: string, rootCause: string) {
+  const response = await fetch(`/api/v1/diagnoses/${encodeURIComponent(id)}/confirm`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken() ?? ''}` }, body: JSON.stringify({ rootCause }) });
+  const result = await response.json();
+  if (response.status === 401) window.dispatchEvent(new Event('aeropulse:unauthorized'));
+  if (!response.ok) throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
+  return result.data as Diagnosis;
+}
+
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;
 

@@ -58,6 +58,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   initiatedFailovers FailoverEvent[]
+  confirmedDiagnoses FaultDiagnosis[]
 
   @@index([role, active])
 }
@@ -89,9 +90,36 @@ model Device {
   heartbeats      Heartbeat[]
   failoversFrom   FailoverEvent[] @relation("FailoverFrom")
   failoversTo     FailoverEvent[] @relation("FailoverTo")
+  diagnoses       FaultDiagnosis[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
+}
+
+model FaultDiagnosis {
+  id                 String    @id @default(uuid()) @db.Uuid
+  deviceId           String    @db.Uuid
+  device             Device    @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  ruleCode           String    @db.VarChar(64)
+  suspectedCause     String    @db.VarChar(250)
+  component          String    @db.VarChar(100)
+  severity           String    @db.VarChar(16)
+  symptoms           Json
+  supportingTelemetry Json
+  serviceImpact      String    @db.VarChar(250)
+  investigationSteps Json
+  recoveryAction     String    @db.VarChar(250)
+  detectedAt         DateTime
+  lastSeenAt         DateTime
+  resolvedAt         DateTime?
+  confirmedRootCause String?   @db.VarChar(500)
+  confirmedById      String?   @db.Uuid
+  confirmedBy        User?     @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt        DateTime?
+  simulated          Boolean   @default(true)
+
+  @@index([deviceId, detectedAt(sort: Desc)])
+  @@index([resolvedAt, severity])
 }
 
 model FailoverEvent {

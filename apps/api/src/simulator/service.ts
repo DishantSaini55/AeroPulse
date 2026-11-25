@@ -1,6 +1,6 @@
 import type { Database } from '../db.js';
 import { TelemetryGenerator, type Scenario } from './generator.js';
-import type { TelemetryBatchEvent } from '../realtime.js';
+import type { SimulatorControl, TelemetryBatchEvent } from '../realtime.js';
 
 const INTERVAL_MS = 5000;
 
@@ -16,19 +16,33 @@ export class TelemetrySimulator {
     private readonly db: Database,
     private readonly intervalMs = INTERVAL_MS,
     private readonly onBatch?: (event: TelemetryBatchEvent) => void,
+    private readonly onControl?: (control: SimulatorControl) => void,
   ) {}
 
   setScenario(deviceCode: string, scenario: Scenario) {
+    this.applyControl({ kind: 'SCENARIO', deviceCode, scenario });
+    this.onControl?.({ kind: 'SCENARIO', deviceCode, scenario });
+  }
+
+  setHeartbeatPaused(deviceCode: string, paused: boolean) {
+    this.applyControl({ kind: 'HEARTBEAT', deviceCode, paused });
+    this.onControl?.({ kind: 'HEARTBEAT', deviceCode, paused });
+  }
+
+  applyControl(control: SimulatorControl) {
+    if (control.kind === 'HEARTBEAT') {
+      if (control.paused) this.pausedHeartbeats.add(control.deviceCode);
+      else this.pausedHeartbeats.delete(control.deviceCode);
+      return;
+    }
+    const scenario = control.scenario as Scenario;
+    const deviceCode = control.deviceCode;
     this.scenarios.set(deviceCode, scenario);
-    this.setHeartbeatPaused(deviceCode, scenario === 'MISSING_HEARTBEAT' || scenario === 'NETWORK_DISCONNECTION');
+    if (scenario === 'MISSING_HEARTBEAT' || scenario === 'NETWORK_DISCONNECTION') this.pausedHeartbeats.add(deviceCode);
+    else this.pausedHeartbeats.delete(deviceCode);
   }
 
   getScenario(deviceCode: string): Scenario { return this.scenarios.get(deviceCode) ?? 'NORMAL'; }
-
-  setHeartbeatPaused(deviceCode: string, paused: boolean) {
-    if (paused) this.pausedHeartbeats.add(deviceCode);
-    else this.pausedHeartbeats.delete(deviceCode);
-  }
 
   isHeartbeatPaused(deviceCode: string) { return this.pausedHeartbeats.has(deviceCode); }
 

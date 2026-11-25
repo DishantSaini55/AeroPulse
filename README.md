@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, incident and repair records, reliability analytics, recurring-failure recommendations, operational reports, audit activity, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, incident workflow, device maintenance history, reliability charts, recommendation reviews, reports, event history, simulation laboratory, device telemetry history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes, alarms and incident changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can assign engineers and approve urgent incident closure; assigned engineers can document investigations and repairs.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, incident and repair records, reliability analytics, recurring-failure recommendations, operational reports, audit activity, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, incident workflow, device maintenance history, reliability charts, recommendation reviews, reports, event history, simulation laboratory, device telemetry history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes, alarms and incident changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can assign engineers and approve urgent incident closure; assigned engineers can document investigations and repairs. A Docker Compose demonstration runs two API instances behind Nginx with PostgreSQL and Redis.
 
 ## API
 
@@ -67,6 +67,29 @@ The Reliability page computes metrics from persisted simulation records. Overlap
 The Recommendations page groups confirmed root causes per device within a configurable rolling window (30 days by default) and resets the count after a recorded unit replacement. Overlapping diagnostic rules form one failure episode. Default thresholds are 1: inspect/monitor, 2: preventive maintenance, 3: detailed investigation, 4: component review when the same component repeats, and 5: complete equipment replacement review. The page shows equipment age when known, component frequency, recorded repairs and cost, missing-heartbeat downtime, and an explicitly labelled linear 30-day repair-cost estimate when at least seven calendar days of age are available. No unrecorded replacement price is invented. Recommendations are decision support, not automatic replacement orders. A supervisor or administrator can approve or decline a recommendation with a note; the decision is stored against an evidence fingerprint and becomes stale when underlying evidence changes. Physical unit replacement remains a separate supervisor-authorized maintenance record that preserves old and new serial numbers. `RECOMMENDATION_*` values in `apps/api/.env.example` configure the policy.
 
 Reports provide recorded incident, repair, replacement, failover and audit rows for a UTC date range of up to 365 days. Optional device and system filters are available where applicable. The browser preview and CSV export use the same query, return at most 5,000 rows, and CSV fields are quoted with formula-like values prefixed to prevent spreadsheet formula execution. Audit events record authenticated `POST`, `PATCH`, `PUT` and `DELETE` attempts after the response: actor, role snapshot, method, route, status and UTC time. They exclude request bodies, credentials and tokens. The audit write is best effort and intentionally separate from the original action transaction. Additional indexes support report time filters on diagnoses, incidents, repairs, replacements and audit events; telemetry retention and infrastructure scaling remain later work.
+
+## Docker multi-instance demonstration
+
+Docker Compose starts PostgreSQL, Redis, a one-time migration/seed job, `api-a`, `api-b`, and Nginx-hosted web at `http://localhost:8080`. The API instances share PostgreSQL. Redis provides the Socket.IO adapter, so an event emitted by the single background-job leader reaches clients connected to either API. A Redis lease (`aeropulse:leader`) permits only one instance to run the simulator, diagnostics, alarm sync, redundancy checks and weather refresh. The active leader renews its 10-second lease every 3 seconds; if it stops, the other instance can acquire the lease and start those jobs. Simulator control requests are broadcast through Redis so a request served by either API reaches the leader.
+
+Set a local Docker-only secret before starting; it is intentionally not committed:
+
+```powershell
+$env:AEROPULSE_JWT_SECRET = "use-a-unique-secret-with-at-least-32-bytes"
+docker compose up --build -d
+```
+
+Check `docker compose ps`, then open `http://localhost:8080`. Seeded inventory is available; create an account with the existing local bootstrap workflow after the stack starts. To demonstrate HTTP continuity, keep the browser open, run `docker compose stop api-a`, and refresh an API-backed page. Nginx retries the remaining healthy API. Restart it with `docker compose start api-a`. To remove containers while retaining volumes, run `docker compose down`; append `-v` only when you explicitly want to erase Docker demo database and Redis data.
+
+The Docker PostgreSQL database is separate from the existing local development database. Bootstrap its first administrator once before signing in:
+
+```powershell
+$env:AEROPULSE_BOOTSTRAP_ADMIN_EMAIL = "admin@example.com"
+$env:AEROPULSE_BOOTSTRAP_ADMIN_PASSWORD = "choose-a-unique-long-password"
+docker compose exec -e BOOTSTRAP_ADMIN_EMAIL -e BOOTSTRAP_ADMIN_PASSWORD api-a npm run auth:bootstrap
+```
+
+This is a local resilience demonstration, not complete infrastructure HA. The Nginx container, Redis, PostgreSQL database and one Docker host remain single points of failure. A Redis outage stops cluster startup rather than allowing two simulator leaders.
 
 The weather response is labelled `simulated: false` and includes observation and fetch timestamps, temperature (°C), dew point (°C), visibility (statute miles), wind speed (knots), wind direction (degrees), pressure (hPa), conditions and raw METAR when available. A cached observation may be returned with `stale: true` after an upstream error; without an observation the endpoint returns `503`. The Aviation Weather Center is an external source and may be unavailable.
 

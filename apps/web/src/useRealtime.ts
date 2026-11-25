@@ -13,7 +13,8 @@ export function useRealtime() {
   const [alarmNotices, setAlarmNotices] = useState<AlarmNotice[]>([]);
 
   useEffect(() => {
-    const socket = io({ path: '/socket.io', autoConnect: false, auth: callback => callback({ token: getToken() }) });
+    // WebSocket avoids a multi-request polling session that would require proxy stickiness.
+    const socket = io({ path: '/socket.io', transports: ['websocket'], autoConnect: false, auth: callback => callback({ token: getToken() }) });
     const sync = () => {
       setConnected(true);
       // Socket.IO events missed while disconnected are recovered from REST state.

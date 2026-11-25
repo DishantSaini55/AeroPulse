@@ -50,7 +50,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   app.use(express.json({ limit: '16kb' }));
 
   app.get('/api/v1/health', (_request, response) => {
-    response.json({ status: 'ok', service: 'aeropulse-api' });
+    response.json({ status: 'ok', service: 'aeropulse-api', instanceId: process.env.INSTANCE_ID ?? 'local' });
   });
 
   app.post('/api/v1/auth/login', rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }), async (request, response) => {

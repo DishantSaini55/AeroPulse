@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import type { AuthProvider } from './auth.js';
 import type { StatusChange } from './heartbeat/monitor.js';
+import type { AlarmNotice } from './alarms/service.js';
 
 export type TelemetryBatchEvent = {
   recordedAt: string;
@@ -12,6 +13,7 @@ export type TelemetryBatchEvent = {
 interface ServerToClientEvents {
   'telemetry:batch': (event: TelemetryBatchEvent) => void;
   'status:changed': (event: StatusChange) => void;
+  'alarm:raised': (event: AlarmNotice) => void;
 }
 
 export function attachRealtime(server: HttpServer, auth?: AuthProvider) {

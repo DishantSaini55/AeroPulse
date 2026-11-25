@@ -11,6 +11,7 @@ import { FailbackError, type RedundancyManager } from './failover/manager.js';
 import type { TelemetrySimulator } from './simulator/service.js';
 import { diagnosticThresholds } from './diagnostics/rules.js';
 import type { Scenario } from './simulator/generator.js';
+import { escalationDelay } from './alarms/service.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -324,6 +325,30 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     if (!existing) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Diagnosis not found' } }); return; }
     const data = await db.faultDiagnosis.update({ where: { id }, data: { confirmedRootCause: parsed.data.rootCause, confirmedById: (response.locals.user as PublicUser).id, confirmedAt: new Date() } });
     response.json({ data, simulated: true });
+  });
+
+  app.get('/api/v1/alarms', async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), active: z.enum(['true', 'false']).optional() }).safeParse(request.query);
+    if (!parsed.success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid alarm query' } }); return; }
+    const alarms = await db.alarm.findMany({
+      where: parsed.data.active === 'true' ? { resolvedAt: null } : parsed.data.active === 'false' ? { resolvedAt: { not: null } } : undefined,
+      take: parsed.data.limit, orderBy: { createdAt: 'desc' },
+      include: { device: { select: { code: true, name: true, system: { select: { code: true, name: true } } } }, acknowledgements: { select: { userId: true, acknowledgedAt: true, user: { select: { name: true } } } } },
+    });
+    const user = response.locals.user as PublicUser;
+    response.json({ data: alarms.map(({ acknowledgements, ...alarm }) => ({ ...alarm, acknowledged: acknowledgements.length > 0, acknowledgedByMe: acknowledgements.some(item => item.userId === user.id), acknowledgedAt: acknowledgements[0]?.acknowledgedAt ?? null, acknowledgedBy: acknowledgements[0]?.user.name ?? null })), escalationAfterMs: escalationDelay(), simulated: true });
+  });
+
+  app.post('/api/v1/alarms/:id/acknowledge', async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    if (!z.uuid().safeParse(request.params.id).success) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid alarm ID' } }); return; }
+    const id = String(request.params.id);
+    const alarm = await db.alarm.findUnique({ where: { id }, select: { id: true } });
+    if (!alarm) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Alarm not found' } }); return; }
+    const userId = (response.locals.user as PublicUser).id;
+    const acknowledgement = await db.alarmAcknowledgement.upsert({ where: { alarmId_userId: { alarmId: id, userId } }, create: { alarmId: id, userId }, update: {} });
+    response.json({ data: acknowledgement, simulated: true });
   });
 
   app.get('/api/v1/monitoring/snapshot', async (_request, response) => {

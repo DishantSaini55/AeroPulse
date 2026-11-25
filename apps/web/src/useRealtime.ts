@@ -4,11 +4,13 @@ import { io } from 'socket.io-client';
 import { getToken } from './auth';
 
 export type TelemetryEvent = { recordedAt: string; deviceCodes: string[]; simulated: true };
+export type AlarmNotice = { id: string; level: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; message: string; deviceCode: string; createdAt: string; simulated: true };
 
 export function useRealtime() {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
+  const [alarmNotices, setAlarmNotices] = useState<AlarmNotice[]>([]);
 
   useEffect(() => {
     const socket = io({ path: '/socket.io', autoConnect: false, auth: callback => callback({ token: getToken() }) });
@@ -19,6 +21,7 @@ export function useRealtime() {
       void queryClient.invalidateQueries({ queryKey: ['history'] });
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
       void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
     };
     const disconnect = () => setConnected(false);
     const onBatch = (event: unknown) => {
@@ -37,6 +40,11 @@ export function useRealtime() {
       void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
       void queryClient.invalidateQueries({ queryKey: ['diagnoses'] });
     };
+    const onAlarm = (event: AlarmNotice) => {
+      if (!event || event.simulated !== true || !['INFORMATION', 'WARNING', 'MAJOR', 'CRITICAL'].includes(event.level) || typeof event.id !== 'string') return;
+      setAlarmNotices(previous => [event, ...previous].slice(0, 30));
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);
     const connectError = (error: Error) => {
@@ -46,6 +54,7 @@ export function useRealtime() {
     socket.on('connect_error', connectError);
     socket.on('telemetry:batch', onBatch);
     socket.on('status:changed', onStatus);
+    socket.on('alarm:raised', onAlarm);
     socket.connect();
     return () => {
       socket.off('connect', sync);
@@ -53,9 +62,10 @@ export function useRealtime() {
       socket.off('connect_error', connectError);
       socket.off('telemetry:batch', onBatch);
       socket.off('status:changed', onStatus);
+      socket.off('alarm:raised', onAlarm);
       socket.disconnect();
     };
   }, [queryClient]);
 
-  return { connected, events };
+  return { connected, events, alarmNotices };
 }

@@ -112,6 +112,9 @@ export async function confirmDiagnosis(id: string, rootCause: string) {
   if (!response.ok) throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
   return result.data as Diagnosis;
 }
+export type Alarm = { id: string; sourceKey: string; level: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; initialLevel: string; message: string; createdAt: string; resolvedAt: string | null; acknowledged: boolean; acknowledgedByMe: boolean; acknowledgedAt: string | null; acknowledgedBy: string | null; device: { code: string; name: string; system: { code: string; name: string } } };
+export const getAlarms = async (active: 'true' | 'false' | 'all' = 'true') => (await getJson<{ data: Alarm[] }>(`/api/v1/alarms?limit=100${active === 'all' ? '' : `&active=${active}`}`)).data;
+export const acknowledgeAlarm = (id: string) => postAction(`/api/v1/alarms/${encodeURIComponent(id)}/acknowledge`, {});
 
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;

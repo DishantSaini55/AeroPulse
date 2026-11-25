@@ -48,6 +48,13 @@ enum FailoverResult {
   BLOCKED
 }
 
+enum AlarmLevel {
+  INFORMATION
+  WARNING
+  MAJOR
+  CRITICAL
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique @db.VarChar(254)
@@ -59,6 +66,7 @@ model User {
   updatedAt    DateTime @updatedAt
   initiatedFailovers FailoverEvent[]
   confirmedDiagnoses FaultDiagnosis[]
+  alarmAcknowledgements AlarmAcknowledgement[]
 
   @@index([role, active])
 }
@@ -91,6 +99,7 @@ model Device {
   failoversFrom   FailoverEvent[] @relation("FailoverFrom")
   failoversTo     FailoverEvent[] @relation("FailoverTo")
   diagnoses       FaultDiagnosis[]
+  alarms          Alarm[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
@@ -117,9 +126,42 @@ model FaultDiagnosis {
   confirmedBy        User?     @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
   confirmedAt        DateTime?
   simulated          Boolean   @default(true)
+  alarm              Alarm?
 
   @@index([deviceId, detectedAt(sort: Desc)])
   @@index([resolvedAt, severity])
+}
+
+model Alarm {
+  id             String     @id @default(uuid()) @db.Uuid
+  sourceKey      String     @unique @db.VarChar(120)
+  diagnosisId    String?    @unique @db.Uuid
+  diagnosis      FaultDiagnosis? @relation(fields: [diagnosisId], references: [id], onDelete: Restrict)
+  deviceId       String     @db.Uuid
+  device         Device     @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  level          AlarmLevel
+  initialLevel   AlarmLevel
+  message        String     @db.VarChar(500)
+  createdAt      DateTime   @default(now())
+  lastEscalatedAt DateTime?
+  resolvedAt     DateTime?
+  simulated      Boolean    @default(true)
+  acknowledgements AlarmAcknowledgement[]
+
+  @@index([resolvedAt, level, createdAt(sort: Desc)])
+  @@index([deviceId, createdAt(sort: Desc)])
+}
+
+model AlarmAcknowledgement {
+  id             String   @id @default(uuid()) @db.Uuid
+  alarmId        String   @db.Uuid
+  alarm          Alarm    @relation(fields: [alarmId], references: [id], onDelete: Restrict)
+  userId         String   @db.Uuid
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  acknowledgedAt DateTime @default(now())
+
+  @@unique([alarmId, userId])
+  @@index([userId, acknowledgedAt(sort: Desc)])
 }
 
 model FailoverEvent {

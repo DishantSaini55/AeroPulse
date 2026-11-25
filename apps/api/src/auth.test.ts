@@ -19,6 +19,7 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
   const engineer = await db.user.create({ data: { email: `engineer-${suffix}@example.test`, name: 'Test Engineer', role: 'MAINTENANCE_ENGINEER', passwordHash: await bcrypt.hash(password, 10) } });
   const createdIds = [admin.id, engineer.id];
   let diagnosisId: string | undefined;
+  let alarmId: string | undefined;
   const auth = new AuthService(db, secret);
   const simulator = new TelemetrySimulator(db);
   const server = createApp(db, undefined, auth, undefined, heartbeatPolicyFromEnv(), undefined, simulator).listen(0);
@@ -65,6 +66,12 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
       investigationSteps: ['Test inspection'], recoveryAction: 'No action', detectedAt: new Date(), lastSeenAt: new Date(),
     } });
     diagnosisId = finding.id;
+    const testAlarm = await db.alarm.create({ data: { sourceKey: `diagnosis:${finding.id}`, diagnosisId: finding.id, deviceId: radar.id, level: 'WARNING', initialLevel: 'WARNING', message: 'Simulated test fault', createdAt: new Date() } });
+    alarmId = testAlarm.id;
+    assert.equal((await fetch(`${url}/api/v1/alarms?active=true`, { headers: engineerHeaders })).status, 200);
+    for (let attempt = 0; attempt < 2; attempt++) assert.equal((await fetch(`${url}/api/v1/alarms/${testAlarm.id}/acknowledge`, { method: 'POST', headers: engineerHeaders })).status, 200);
+    assert.equal(await db.alarmAcknowledgement.count({ where: { alarmId: testAlarm.id, userId: engineer.id } }), 1);
+    assert.equal((await db.faultDiagnosis.findUniqueOrThrow({ where: { id: finding.id } })).resolvedAt, null);
     const confirm = await fetch(`${url}/api/v1/diagnoses/${finding.id}/confirm`, { method: 'PATCH', headers: { ...engineerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ rootCause: 'Verified test cause' }) });
     assert.equal(confirm.status, 200);
     assert.equal((await db.faultDiagnosis.findUniqueOrThrow({ where: { id: finding.id } })).confirmedById, engineer.id);
@@ -96,6 +103,7 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     assert.equal(await auth.verifyToken(expired), null);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (alarmId) { await db.alarmAcknowledgement.deleteMany({ where: { alarmId } }); await db.alarm.delete({ where: { id: alarmId } }); }
     if (diagnosisId) await db.faultDiagnosis.delete({ where: { id: diagnosisId } });
     await db.user.deleteMany({ where: { id: { in: createdIds } } });
     await db.$disconnect();

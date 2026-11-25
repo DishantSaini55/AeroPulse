@@ -8,6 +8,7 @@ import { AuthService, requireJwtSecret } from './auth.js';
 import { heartbeatPolicyFromEnv } from './heartbeat/monitor.js';
 import { RedundancyManager } from './failover/manager.js';
 import { DiagnosisService } from './diagnostics/service.js';
+import { AlarmService } from './alarms/service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -21,9 +22,10 @@ const weather = new WeatherService(db);
 const heartbeatPolicy = heartbeatPolicyFromEnv();
 let io: ReturnType<typeof attachRealtime>;
 const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs);
+const alarms = new AlarmService(db, event => io.emit('alarm:raised', event));
 const simulator = new TelemetrySimulator(db, 5000, event => {
   io.emit('telemetry:batch', event);
-  void diagnosis.scan().catch(error => console.error('Diagnosis scan failed', error));
+  void (async () => { await diagnosis.scan(); await alarms.sync(); })().catch(error => console.error('Diagnosis/alarm scan failed', error));
 });
 const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => io.emit('status:changed', change));
 const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator));

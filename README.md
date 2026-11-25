@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, simulation laboratory, device history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches after database commit and status changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can perform failback; engineers can record confirmed root causes.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, simulation laboratory, device history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes and new alarms; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can perform failback; engineers can record confirmed root causes and acknowledge alarms.
 
 ## API
 
@@ -26,6 +26,8 @@ The current implementation includes a TypeScript Express API, PostgreSQL/Prisma 
 | GET | `/api/v1/simulation/devices` | List current local simulation scenarios (administrator) |
 | POST | `/api/v1/simulation/devices/:code/scenario` | Inject a device scenario (administrator) |
 | POST | `/api/v1/simulation/systems/:code/scenario` | Inject a correlated system scenario (administrator) |
+| GET | `/api/v1/alarms` | Active alarms or resolved history, with acknowledgement state |
+| POST | `/api/v1/alarms/:id/acknowledge` | Acknowledge an alarm without resolving its fault |
 | GET | `/api/v1/devices/:code/telemetry` | Paginated telemetry history and latest heartbeat |
 | GET | `/api/v1/weather/vidp` | Real VIDP METAR observation with cache and freshness state |
 | GET | `/api/v1/notes` | List simulated operations notes |
@@ -39,6 +41,8 @@ Telemetry history accepts `page` (default `1`) and `limit` (default `20`, maximu
 The redundancy manager checks every five seconds. By default, a device becomes unavailable after three missed expected five-second heartbeats; set `HEARTBEAT_MISSED_LIMIT` (1–12) to change the threshold. On active-device failure it activates a healthy standby in a database transaction. If neither device is healthy, service availability becomes `OUTAGE`. A recovered primary remains inactive until an administrator or supervisor requests failback. Each attempt records its result and duration. The database locks each system row during assignment changes and enforces at most one active device per system with a partial unique index.
 
 The diagnostic engine evaluates persisted simulated telemetry and heartbeat recency. Rules cover thermal stress, cooling fan symptoms, resource overload, memory pressure, storage pressure, network degradation, low voltage, missing heartbeat and correlated problems across both devices. Findings contain supporting measurements, suspected cause, severity, service impact and investigation steps. An engineer can separately record a confirmed root cause. Active findings are deduplicated per device and rule; resolved findings remain in history. Thresholds are configurable through the `DIAG_*` variables in `.env.example`. Injection names are never passed to the diagnostic rules.
+
+Each active diagnosis creates one durable alarm. Severity levels are Information, Warning, Major and Critical. Unacknowledged Warning and Major alarms escalate after `ALARM_ESCALATE_AFTER_MS` (default two minutes); acknowledgements are stored per user and do not resolve faults. Recovery creates an informational history event. The browser requires an explicit Enable alarm sound click before playing distinct severity tones or Speech Synthesis announcements. Volume and mute are local browser preferences. The Alarm Center retrieves active and historical alarms after reconnection.
 
 The weather response is labelled `simulated: false` and includes observation and fetch timestamps, temperature (°C), dew point (°C), visibility (statute miles), wind speed (knots), wind direction (degrees), pressure (hPa), conditions and raw METAR when available. A cached observation may be returned with `stale: true` after an upstream error; without an observation the endpoint returns `503`. The Aviation Weather Center is an external source and may be unavailable.
 

@@ -22,6 +22,7 @@ export function useRealtime() {
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
       void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
       void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
     };
     const disconnect = () => setConnected(false);
     const onBatch = (event: unknown) => {
@@ -44,6 +45,11 @@ export function useRealtime() {
       if (!event || event.simulated !== true || !['INFORMATION', 'WARNING', 'MAJOR', 'CRITICAL'].includes(event.level) || typeof event.id !== 'string') return;
       setAlarmNotices(previous => [event, ...previous].slice(0, 30));
       void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+    };
+    const onIncident = () => {
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      void queryClient.invalidateQueries({ queryKey: ['maintenance'] });
     };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);
@@ -55,6 +61,7 @@ export function useRealtime() {
     socket.on('telemetry:batch', onBatch);
     socket.on('status:changed', onStatus);
     socket.on('alarm:raised', onAlarm);
+    socket.on('incident:changed', onIncident);
     socket.connect();
     return () => {
       socket.off('connect', sync);
@@ -63,6 +70,7 @@ export function useRealtime() {
       socket.off('telemetry:batch', onBatch);
       socket.off('status:changed', onStatus);
       socket.off('alarm:raised', onAlarm);
+      socket.off('incident:changed', onIncident);
       socket.disconnect();
     };
   }, [queryClient]);

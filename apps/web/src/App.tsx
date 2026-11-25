@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Activity, Antenna, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight,
   Clock3, CloudSun, Database, ExternalLink, HardDrive, LayoutDashboard,
-  Bell, FlaskConical, LogOut, Moon, Radio, RefreshCw, Search, Server, ShieldCheck, Stethoscope, Sun, Users, Wifi, WifiOff,
+  Bell, ClipboardList, FlaskConical, LogOut, Moon, Radio, RefreshCw, Search, Server, ShieldCheck, Stethoscope, Sun, Users, Wifi, WifiOff, Wrench,
 } from 'lucide-react';
 import { getHistory, getSnapshot, getWeather, type Device, type Telemetry, type Weather } from './api';
 import { useRealtime, type TelemetryEvent } from './useRealtime';
@@ -13,6 +13,7 @@ import { LoginPage, UsersPage } from './AuthPages';
 import { RedundancyPage } from './RedundancyPage';
 import { DiagnosticsPage, SimulationLab } from './DiagnosisPages';
 import { AlarmBanner, AlarmPage } from './AlarmCenter';
+import { IncidentDetailPage, IncidentsPage, MaintenanceIndexPage, MaintenancePage } from './IncidentPages';
 import { formatUtcDateTime, formatUtcTime } from './time';
 
 const TelemetryChart = lazy(() => import('./TelemetryChart'));
@@ -153,6 +154,7 @@ function DeviceDetail({ devices, now, loading, error, streamConnected }: { devic
   if (!device) return <div className="state-panel">Device not found. <NavLink to="/infrastructure" className="text-link">Back to infrastructure</NavLink></div>;
   return <><NavLink to="/infrastructure" className="back-link"><ArrowLeft size={15} /> Infrastructure</NavLink>
     <PageHeading eyebrow={`ASSET / ${device.system.code}`} title={device.name} subtitle={`${device.code} · ${device.system.name} · simulated device`} />
+    <p><NavLink className="text-link" to={`/maintenance/${device.code}`}>View maintenance history →</NavLink></p>
     <div className="detail-strip"><div><span>REDUNDANCY ROLE</span><strong>{roleLabel(device.role)}</strong></div><div><span>ASSIGNMENT</span><strong>{device.activationState}</strong></div><div><span>LAST HEARTBEAT</span><strong className={fresh(device.latestHeartbeatAt, now) ? 'green-text' : 'amber-text'}>{stamp(device.latestHeartbeatAt)}</strong></div><div><span>REGISTRY HEALTH</span><strong>{device.health}</strong></div></div>
     <DataState loading={history.isPending} error={history.error} empty={!history.data?.data.length}>
       <section className="panel chart-panel"><div className="panel-head"><div><span className="eyebrow">SIMULATED TELEMETRY</span><h2>Historical readings</h2></div><div className="select-wrap"><select aria-label="Select telemetry metric" value={metric?.key ?? ''} onChange={event => setSelected(event.target.value)}>{available.map(field => <option key={field.key} value={field.key}>{field.label}</option>)}</select><ChevronDown size={14} /></div></div>
@@ -192,6 +194,8 @@ function OperationsApp({ user }: { user: User }) {
     { to: '/redundancy', label: 'Redundancy', icon: ShieldCheck, end: false },
     { to: '/diagnostics', label: 'Fault diagnostics', icon: Stethoscope, end: false },
     { to: '/alarms', label: 'Alarm center', icon: Bell, end: false },
+    { to: '/incidents', label: 'Incidents', icon: ClipboardList, end: false },
+    { to: '/maintenance', label: 'Maintenance', icon: Wrench, end: true },
     { to: '/weather', label: 'Aviation weather', icon: CloudSun, end: false },
     ...(user.role === 'ADMINISTRATOR' ? [{ to: '/users', label: 'User management', icon: Users, end: false }] : []),
     ...(user.role === 'ADMINISTRATOR' ? [{ to: '/simulation', label: 'Simulation lab', icon: FlaskConical, end: false }] : []),
@@ -202,7 +206,7 @@ function OperationsApp({ user }: { user: User }) {
       <div className="sidebar-bottom"><div className="environment"><span className="env-dot" /><div><strong>SIMULATION</strong><span>Local environment</span></div></div><div className="sidebar-account" title={`${user.name} · ${user.email}`}><strong>{user.name}</strong><span>{user.role.replaceAll('_', ' ').toLowerCase()}</span></div><button className="collapse-button" onClick={logout} aria-label="Sign out"><LogOut size={16} /><span>Sign out</span></button><button className="collapse-button" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}<span>{collapsed ? '' : 'Collapse sidebar'}</span></button></div>
     </aside>
     <div className="main-area"><header className="topbar"><div className="topbar-title"><span className="topbar-path">AEROPULSE</span><span className="topbar-divider">/</span><span>Operations workspace</span></div><div className="topbar-actions"><span className={`connection ${snapshot.isError ? 'disconnected' : ''}`}>{snapshot.isError ? <WifiOff size={14} /> : <Wifi size={14} />}{snapshot.isError ? 'API DISCONNECTED' : realtime.connected ? 'LIVE STREAM' : 'POLLING FALLBACK'}</span><span className="topbar-time"><Clock3 size={14} /> {formatUtcTime(now, false)}</span><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button></div></header>
-      <AlarmBanner notices={realtime.alarmNotices} /><main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/redundancy" element={<RedundancyPage now={now} streamConnected={realtime.connected} />} /><Route path="/diagnostics" element={<DiagnosticsPage />} /><Route path="/alarms" element={<AlarmPage />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} />{user.role === 'ADMINISTRATOR' && <Route path="/users" element={<UsersPage />} />}{user.role === 'ADMINISTRATOR' && <Route path="/simulation" element={<SimulationLab />} />}<Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
+      <AlarmBanner notices={realtime.alarmNotices} /><main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/redundancy" element={<RedundancyPage now={now} streamConnected={realtime.connected} />} /><Route path="/diagnostics" element={<DiagnosticsPage />} /><Route path="/alarms" element={<AlarmPage />} /><Route path="/incidents" element={<IncidentsPage />} /><Route path="/incidents/:id" element={<IncidentDetailPage />} /><Route path="/maintenance" element={<MaintenanceIndexPage />} /><Route path="/maintenance/:code" element={<MaintenancePage />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} />{user.role === 'ADMINISTRATOR' && <Route path="/users" element={<UsersPage />} />}{user.role === 'ADMINISTRATOR' && <Route path="/simulation" element={<SimulationLab />} />}<Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
       <footer className="footer"><span><span className="footer-led" /> AEROPULSE / INDEPENDENT SIMULATION</span><span>Equipment data: simulated · Weather: external observation</span></footer>
     </div>
   </div>;

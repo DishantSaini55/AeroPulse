@@ -14,6 +14,7 @@ interface ServerToClientEvents {
   'telemetry:batch': (event: TelemetryBatchEvent) => void;
   'status:changed': (event: StatusChange) => void;
   'alarm:raised': (event: AlarmNotice) => void;
+  'incident:changed': (event: { simulated: true }) => void;
 }
 
 export function attachRealtime(server: HttpServer, auth?: AuthProvider) {

@@ -9,6 +9,7 @@ import { heartbeatPolicyFromEnv } from './heartbeat/monitor.js';
 import { RedundancyManager } from './failover/manager.js';
 import { DiagnosisService } from './diagnostics/service.js';
 import { AlarmService } from './alarms/service.js';
+import { IncidentService } from './incidents/service.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -23,20 +24,23 @@ const heartbeatPolicy = heartbeatPolicyFromEnv();
 let io: ReturnType<typeof attachRealtime>;
 const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs);
 const alarms = new AlarmService(db, event => io.emit('alarm:raised', event));
+const incidents = new IncidentService(db, () => io.emit('incident:changed', { simulated: true }));
 const simulator = new TelemetrySimulator(db, 5000, event => {
   io.emit('telemetry:batch', event);
   void (async () => {
     try { await diagnosis.scan(); }
     catch (error) { console.error('Diagnosis scan failed', error); }
     await alarms.sync();
+    await incidents.sync();
   })().catch(error => console.error('Alarm scan failed', error));
 });
 const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => {
   io.emit('status:changed', change);
-  void alarms.sync().catch(error => console.error('Outage alarm scan failed', error));
+  void alarms.sync().then(() => incidents.sync()).catch(error => console.error('Outage incident scan failed', error));
 });
-const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator));
+const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator, incidents));
 io = attachRealtime(server, auth);
+void incidents.sync().catch(error => console.error('Initial incident scan failed', error));
 simulator.start();
 redundancyManager.start();
 weather.start();

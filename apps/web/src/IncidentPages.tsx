@@ -1,0 +1,85 @@
+import { useState, type FormEvent } from 'react';
+import { NavLink, useParams } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ClipboardList, Wrench } from 'lucide-react';
+import { approveIncident, commentIncident, getEngineers, getIncident, getIncidents, getMaintenanceHistory, getMaintenanceRecords, recordRepair, recordReplacement, transitionIncident, type Incident, type IncidentStatus, type MaintenanceFilters } from './api';
+import { useAuth } from './auth';
+import { formatUtcDateTime } from './time';
+import './incidents.css';
+
+const steps: IncidentStatus[] = ['DETECTED', 'ACKNOWLEDGED', 'ASSIGNED', 'UNDER_INVESTIGATION', 'UNDER_REPAIR', 'VERIFICATION', 'RESOLVED'];
+const label = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/^./, char => char.toUpperCase());
+const elapsed = (ms: number | null | undefined) => ms == null ? '—' : `${(ms / 60000).toFixed(1)} min`;
+
+export function IncidentsPage() {
+  const [filter, setFilter] = useState<'open' | 'resolved' | 'all'>('open');
+  const query = useQuery({ queryKey: ['incidents', filter], queryFn: () => getIncidents(filter), refetchInterval: 10000 });
+  return <><div className="page-heading"><span className="eyebrow">OPERATIONS / RESPONSE</span><h1>Incidents</h1><p>Simulated fault investigations, assignments, repair records and closure approvals.</p></div><div className="toolbar"><select aria-label="Filter incidents" value={filter} onChange={event => setFilter(event.target.value as typeof filter)}><option value="open">Open incidents</option><option value="resolved">Resolved incidents</option><option value="all">All incidents</option></select><span className="result-count">{query.data?.length ?? 0} incidents</span></div>{query.isPending ? <div className="state-panel">Loading incidents…</div> : query.error ? <div className="state-panel state-error">{query.error.message}</div> : !query.data?.length ? <div className="state-panel"><ClipboardList size={17} /> No incidents for this filter.</div> : <div className="incident-list">{query.data.map(item => <NavLink to={`/incidents/${item.id}`} className="panel incident-card" key={item.id}><div className="incident-card-top"><strong>{item.device.system.code} / {item.device.code}</strong><span className={`badge badge-${item.priority === 'URGENT' ? 'red' : item.priority === 'HIGH' ? 'amber' : 'blue'}`}>{item.priority}</span></div><p>{item.description}</p><div className="incident-meta"><span>{label(item.status)}</span><span>{item.assignedTo?.name ?? 'Unassigned'}</span><span>{formatUtcDateTime(item.createdAt)}</span></div></NavLink>)}</div>}</>;
+}
+
+function IncidentActions({ item }: { item: Incident }) {
+  const { user } = useAuth();
+  const client = useQueryClient();
+  const [engineerId, setEngineerId] = useState('');
+  const [comment, setComment] = useState('');
+  const [action, setAction] = useState('');
+  const [parts, setParts] = useState('');
+  const [cost, setCost] = useState('0');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const next = steps[steps.indexOf(item.status) + 1];
+  const manager = user?.role === 'ADMINISTRATOR' || user?.role === 'SUPERVISOR';
+  const canWork = manager || item.assignedTo?.id === user?.id;
+  const engineers = useQuery({ queryKey: ['incidents', 'engineers'], queryFn: getEngineers, enabled: manager && next === 'ASSIGNED' });
+  async function run(operation: () => Promise<unknown>) {
+    setBusy(true); setError('');
+    try { await operation(); await client.invalidateQueries({ queryKey: ['incidents'] }); await client.invalidateQueries({ queryKey: ['maintenance'] }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Action failed'); }
+    finally { setBusy(false); }
+  }
+  const advanceAllowed = next && (next === 'ACKNOWLEDGED' || (next === 'ASSIGNED' ? manager : canWork));
+  return <section className="panel incident-actions"><div className="panel-head"><div><span className="eyebrow">WORKFLOW</span><h2>Next action</h2></div></div><div className="incident-action-body">
+    {next && <div className="incident-next"><span>Next step: <strong>{label(next)}</strong></span>{next === 'ASSIGNED' && manager && <select aria-label="Assign engineer" value={engineerId} onChange={event => setEngineerId(event.target.value)}><option value="">Choose engineer</option>{engineers.data?.map(engineer => <option key={engineer.id} value={engineer.id}>{engineer.name}</option>)}</select>}{advanceAllowed && <button disabled={busy || (next === 'ASSIGNED' && !engineerId)} onClick={() => void run(() => transitionIncident(item.id, next, next === 'ASSIGNED' ? engineerId : undefined))}>Move to {label(next)}</button>}</div>}
+    {item.status === 'VERIFICATION' && item.priority === 'URGENT' && !item.approvedAt && manager && <button disabled={busy || !item.alarm.resolvedAt} onClick={() => void run(() => approveIncident(item.id))}>Approve closure</button>}
+    {item.status !== 'RESOLVED' && canWork && <form onSubmit={(event: FormEvent) => { event.preventDefault(); void run(async () => { await commentIncident(item.id, comment.trim()); setComment(''); }); }}><label>Investigation note<textarea value={comment} onChange={event => setComment(event.target.value)} minLength={3} maxLength={2000} required /></label><button disabled={busy || comment.trim().length < 3}>Add note</button></form>}
+    {['UNDER_REPAIR', 'VERIFICATION'].includes(item.status) && canWork && <form onSubmit={(event: FormEvent) => { event.preventDefault(); void run(async () => { await recordRepair(item.id, action.trim(), parts.split(',').map(part => part.trim()).filter(Boolean), Number(cost)); setAction(''); setParts(''); setCost('0'); }); }}><label>Repair action<textarea value={action} onChange={event => setAction(event.target.value)} minLength={3} maxLength={2000} required /></label><div className="incident-fields"><label>Spare parts (comma separated)<input value={parts} onChange={event => setParts(event.target.value)} /></label><label>Cost (₹)<input type="number" min="0" step="0.01" value={cost} onChange={event => setCost(event.target.value)} /></label></div><button disabled={busy || action.trim().length < 3}>Record repair</button></form>}
+    {error && <div className="form-error" role="alert">{error}</div>}
+  </div></section>;
+}
+
+export function IncidentDetailPage() {
+  const { id = '' } = useParams();
+  const query = useQuery({ queryKey: ['incidents', id], queryFn: () => getIncident(id), enabled: !!id, refetchInterval: 10000 });
+  const item = query.data;
+  return <><div className="page-heading"><span className="eyebrow">OPERATIONS / INCIDENT</span><h1>Incident {id.slice(0, 8).toUpperCase()}</h1><p><NavLink to="/incidents" className="text-link">← Back to incidents</NavLink></p></div>{query.isPending ? <div className="state-panel">Loading incident…</div> : query.error ? <div className="state-panel state-error">{query.error.message}</div> : item && <div className="incident-detail-grid"><section className="panel"><div className="panel-head"><div><span className="eyebrow">{item.device.system.code} / {item.device.code}</span><h2>{label(item.status)}</h2></div><span className={`badge badge-${item.priority === 'URGENT' ? 'red' : 'amber'}`}>{item.priority}</span></div><div className="incident-body"><p>{item.description}</p>{item.alarm.diagnosis && <div className="incident-evidence"><strong>Diagnostic evidence</strong><span>Suspected cause: {item.alarm.diagnosis.suspectedCause}</span><span>Symptoms: {item.alarm.diagnosis.symptoms?.join(", ") || "Not recorded"}</span><span>Telemetry: {Object.entries(item.alarm.diagnosis.supportingTelemetry ?? {}).map(([key, value]) => `${key}: ${value}`).join(", ") || "No direct measurement"}</span></div>}<dl><dt>Severity</dt><dd>{item.alarm.level}</dd><dt>Detected (UTC)</dt><dd>{formatUtcDateTime(item.createdAt)}</dd><dt>Assigned engineer</dt><dd>{item.assignedTo?.name ?? 'Unassigned'}</dd><dt>Source fault</dt><dd>{item.alarm.resolvedAt ? `Cleared ${formatUtcDateTime(item.alarm.resolvedAt)}` : 'Still active'}</dd><dt>Confirmed cause</dt><dd>{item.alarm.diagnosis?.confirmedRootCause ?? 'Pending investigation'}</dd><dt>Supervisor approval</dt><dd>{item.approvedBy ? `${item.approvedBy.name} · ${formatUtcDateTime(item.approvedAt)}` : 'Pending'}</dd></dl><NavLink className="text-link" to={`/maintenance/${item.device.code}`}>Device maintenance history →</NavLink></div></section><IncidentActions item={item} /><section className="panel incident-full"><div className="panel-head"><div><span className="eyebrow">AUDIT TRAIL</span><h2>Timeline and repair records</h2></div></div><div className="incident-timeline">{item.events?.map(event => <div key={event.id}><time>{formatUtcDateTime(event.createdAt)}</time><strong>{label(event.kind)}</strong><p>{event.detail}</p><small>{event.actor?.name ?? 'System'}</small></div>)}{item.repairs?.map(repair => <div key={repair.id}><time>{formatUtcDateTime(repair.createdAt)}</time><strong>Repair details</strong><p>{repair.action}</p><small>Parts: {repair.spareParts.join(', ') || 'None'} · Cost: ₹{Number(repair.cost).toFixed(2)} · {repair.actor.name}</small></div>)}</div></section></div>}</>;
+}
+
+export function MaintenanceIndexPage() {
+  const [filters, setFilters] = useState<MaintenanceFilters>({});
+  const [page, setPage] = useState(1);
+  const query = useQuery({ queryKey: ['maintenance', filters, page], queryFn: () => getMaintenanceRecords({ ...filters, page }) });
+  const update = (key: keyof MaintenanceFilters, value: string) => { setPage(1); setFilters(previous => ({ ...previous, [key]: value || undefined })); };
+  return <><div className="page-heading"><span className="eyebrow">MAINTENANCE / HISTORY</span><h1>Maintenance records</h1><p>Search incident history by equipment, system, date, severity and confirmed root cause.</p></div><div className="panel maintenance-filters"><label>Device<input placeholder="AMSS-P" value={filters.device ?? ''} onChange={event => update('device', event.target.value.toUpperCase())} /></label><label>System<input placeholder="AMSS" value={filters.system ?? ''} onChange={event => update('system', event.target.value.toUpperCase())} /></label><label>From<input type="date" value={filters.from ?? ''} onChange={event => update('from', event.target.value)} /></label><label>To<input type="date" value={filters.to ?? ''} onChange={event => update('to', event.target.value)} /></label><label>Severity<select value={filters.severity ?? ''} onChange={event => update('severity', event.target.value)}><option value="">All</option><option>WARNING</option><option>MAJOR</option><option>CRITICAL</option></select></label><label>Confirmed cause<input placeholder="Search cause" value={filters.rootCause ?? ''} onChange={event => update('rootCause', event.target.value)} /></label></div>{query.isPending ? <div className="state-panel">Loading records…</div> : query.error ? <div className="state-panel state-error">{query.error.message}</div> : <><div className="toolbar"><span className="result-count">{query.data?.total ?? 0} records</span><div><button disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Previous</button><span> Page {page} </span><button disabled={page * (query.data?.limit ?? 20) >= (query.data?.total ?? 0)} onClick={() => setPage(value => value + 1)}>Next</button></div></div><div className="incident-list">{query.data?.data.map(item => <NavLink to={`/incidents/${item.id}`} className="panel incident-card" key={item.id}><div className="incident-card-top"><strong>{item.device.system.code} / {item.device.code}</strong><span className="badge badge-amber">{item.alarm.level}</span></div><p>{item.description}</p><div className="incident-meta"><span>{formatUtcDateTime(item.createdAt)}</span><span>{item.alarm.diagnosis?.confirmedRootCause ?? 'Cause not confirmed'}</span><span>{label(item.status)}</span></div></NavLink>)}</div></>}</>;
+}
+
+export function MaintenancePage() {
+  const { code = '' } = useParams();
+  const query = useQuery({ queryKey: ['maintenance', code], queryFn: () => getMaintenanceHistory(code), enabled: !!code });
+  const { user } = useAuth();
+  const client = useQueryClient();
+  const [oldUnitSerial, setOldUnitSerial] = useState('');
+  const [newUnitSerial, setNewUnitSerial] = useState('');
+  const [reason, setReason] = useState('');
+  const [cost, setCost] = useState('0');
+  const [replacementIncidentId, setReplacementIncidentId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const data = query.data;
+  async function submitReplacement(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError('');
+    try { await recordReplacement(code, { oldUnitSerial: oldUnitSerial.trim(), newUnitSerial: newUnitSerial.trim(), reason: reason.trim(), cost: Number(cost), incidentId: replacementIncidentId || undefined }); await client.invalidateQueries({ queryKey: ['maintenance'] }); await client.invalidateQueries({ queryKey: ['incidents'] }); setOldUnitSerial(''); setNewUnitSerial(''); setReason(''); setCost('0'); setReplacementIncidentId(''); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not record replacement'); }
+    finally { setBusy(false); }
+  }
+  return <><div className="page-heading"><span className="eyebrow">MAINTENANCE / DEVICE HISTORY</span><h1>{code} maintenance</h1><p>Permanent simulated incident, repair and unit replacement history. Downtime is measured from recorded fault and service outage intervals.</p></div>{query.isPending ? <div className="state-panel">Loading history…</div> : query.error ? <div className="state-panel state-error">{query.error.message}</div> : data && <><div className="metrics-strip"><div className="metric"><div className="metric-label">RECORDED INCIDENTS</div><div className="metric-value">{data.failureCount}</div></div><div className="metric"><div className="metric-label">EQUIPMENT DOWNTIME</div><div className="metric-value">{elapsed(data.equipmentDowntimeMs)}</div></div><div className="metric"><div className="metric-label">SERVICE DOWNTIME</div><div className="metric-value">{elapsed(data.serviceDowntimeMs)}</div></div><div className="metric"><div className="metric-label">RECORDED COST</div><div className="metric-value">₹{(data.recordedRepairCost + data.replacementCost).toFixed(2)}</div></div></div><p className="incident-small-note">Commissioned: {formatUtcDateTime(data.device.commissionedAt)} · Downtime values are simulated recorded intervals.</p><div className="incident-list">{data.incidents.map(incident => <NavLink key={incident.id} to={`/incidents/${incident.id}`} className="panel incident-card"><div className="incident-card-top"><strong>{label(incident.status)} · {incident.priority}</strong><Wrench size={17} /></div><p>{incident.description}</p><div className="incident-meta"><span>Detected {formatUtcDateTime(incident.createdAt)}</span><span>Cause: {incident.alarm.diagnosis?.confirmedRootCause ?? 'Not confirmed'}</span><span>Component: {incident.alarm.diagnosis?.component ?? 'Unknown'}</span><span>{incident.repairs?.length ?? 0} repairs</span><span>Repair duration: {elapsed(incident.repairDurationMs)}</span></div></NavLink>)}</div><section className="panel replacement-panel"><div className="panel-head"><div><span className="eyebrow">EQUIPMENT HISTORY</span><h2>Unit replacements</h2></div></div>{data.replacements.length ? data.replacements.map(item => <div className="replacement-row" key={item.id}><strong>{item.oldUnitSerial} → {item.newUnitSerial}</strong><span>{item.reason}</span><small>{formatUtcDateTime(item.replacedAt)} · Authorized by {item.authorizedBy.name} · ₹{Number(item.cost).toFixed(2)}</small></div>) : <div className="incident-body">No replacement recorded.</div>}</section>{(user?.role === 'ADMINISTRATOR' || user?.role === 'SUPERVISOR') && <form className="panel replacement-form" onSubmit={event => void submitReplacement(event)}><h2>Record authorized unit replacement</h2><div className="incident-fields"><label>Old unit serial<input required maxLength={100} value={oldUnitSerial} onChange={event => setOldUnitSerial(event.target.value)} /></label><label>New unit serial<input required maxLength={100} value={newUnitSerial} onChange={event => setNewUnitSerial(event.target.value)} /></label></div><label>Reason<textarea required minLength={3} maxLength={2000} value={reason} onChange={event => setReason(event.target.value)} /></label><label>Cost (₹)<input type="number" min="0" step="0.01" value={cost} onChange={event => setCost(event.target.value)} /></label><label>Related incident (optional)<select value={replacementIncidentId} onChange={event => setReplacementIncidentId(event.target.value)}><option value="">No linked incident</option>{data.incidents.map(incident => <option key={incident.id} value={incident.id}>{formatUtcDateTime(incident.createdAt)} · {incident.description.slice(0, 60)}</option>)}</select></label><button disabled={busy}>Record replacement</button>{error && <div className="form-error" role="alert">{error}</div>}</form>}</>}</>;
+}

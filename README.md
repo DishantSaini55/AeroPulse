@@ -4,7 +4,7 @@ AeroPulse is an independent airport infrastructure monitoring simulation inspire
 
 ## Implementation status
 
-The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, simulation laboratory, device history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes and new alarms; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can perform failback; engineers can record confirmed root causes and acknowledge alarms.
+The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, incident and repair records, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, incident workflow, device maintenance history, simulation laboratory, device telemetry history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes, alarms and incident changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can assign engineers and approve urgent incident closure; assigned engineers can document investigations and repairs.
 
 ## API
 
@@ -28,6 +28,16 @@ The current implementation includes a TypeScript Express API, PostgreSQL/Prisma 
 | POST | `/api/v1/simulation/systems/:code/scenario` | Inject a correlated system scenario (administrator) |
 | GET | `/api/v1/alarms` | Active alarms or resolved history, with acknowledgement state |
 | POST | `/api/v1/alarms/:id/acknowledge` | Acknowledge an alarm without resolving its fault |
+| GET | `/api/v1/incidents` | Filtered incident queue |
+| GET | `/api/v1/incidents/:id` | Incident detail, timeline and repairs |
+| GET | `/api/v1/incidents/engineers` | Active engineers for assignment |
+| POST | `/api/v1/incidents/:id/transition` | Advance one lifecycle step |
+| POST | `/api/v1/incidents/:id/approve` | Supervisor approval for closure |
+| POST | `/api/v1/incidents/:id/comments` | Add an investigation note |
+| POST | `/api/v1/incidents/:id/repairs` | Record repair action, parts and cost |
+| GET | `/api/v1/maintenance` | Paginated maintenance records with device, system, date, severity and root-cause filters |
+| GET | `/api/v1/maintenance/:deviceCode` | Device incidents, repairs, downtime and replacement history |
+| POST | `/api/v1/maintenance/:deviceCode/replacements` | Supervisor-authorized unit replacement record |
 | GET | `/api/v1/devices/:code/telemetry` | Paginated telemetry history and latest heartbeat |
 | GET | `/api/v1/weather/vidp` | Real VIDP METAR observation with cache and freshness state |
 | GET | `/api/v1/notes` | List simulated operations notes |
@@ -42,7 +52,9 @@ The redundancy manager checks every five seconds. By default, a device becomes u
 
 The diagnostic engine evaluates persisted simulated telemetry and heartbeat recency. Rules cover thermal stress, cooling fan symptoms, resource overload, memory pressure, storage pressure, network degradation, low voltage, missing heartbeat and correlated problems across both devices. Findings contain supporting measurements, suspected cause, severity, service impact and investigation steps. An engineer can separately record a confirmed root cause. Active findings are deduplicated per device and rule; resolved findings remain in history. Thresholds are configurable through the `DIAG_*` variables in `.env.example`. Injection names are never passed to the diagnostic rules.
 
-Each active diagnosis creates one durable alarm. Severity levels are Information, Warning, Major and Critical. Unacknowledged Warning and Major alarms escalate after `ALARM_ESCALATE_AFTER_MS` (default two minutes); acknowledgements are stored per user and do not resolve faults. Recovery creates an informational history event. The browser requires an explicit Enable alarm sound click before playing distinct severity tones or Speech Synthesis announcements. Volume and mute are local browser preferences. The Alarm Center retrieves active and historical alarms after reconnection.
+Each active diagnosis creates one durable alarm. Severity levels are Information, Warning, Major and Critical. Unacknowledged Warning and Major alarms escalate after `ALARM_ESCALATE_AFTER_MS` (default two minutes); acknowledgements are stored per user and do not resolve faults. Recovery creates an informational history event. The browser requires an explicit Enable alarm sound click before playing a soft chime for ten seconds, repeating at one-minute intervals while the fault remains active. Volume and mute are local browser preferences. The Alarm Center retrieves active and historical alarms after reconnection.
+
+Each new active Warning, Major or Critical alarm opens one incident. The lifecycle is Detected → Acknowledged → Assigned → Under Investigation → Under Repair → Verification → Resolved. Incident priority follows alarm escalation. Supervisors and administrators assign active maintenance engineers; the assigned engineer records notes and repairs. Urgent incidents need supervisor approval, and every incident requires the source fault to clear before resolution. Timeline events and repair records are durable. Device maintenance history lists incidents, confirmed causes, components, spare parts, recorded repair and replacement costs, repair duration, equipment downtime from missing-heartbeat diagnoses and service downtime from outage alarms. Supervisors can record physical unit replacement serials while keeping the logical device's history. These are recorded simulation intervals, not measured production uptime. Incident resolution is a verified human workflow, separate from automatic alarm recovery.
 
 The weather response is labelled `simulated: false` and includes observation and fetch timestamps, temperature (°C), dew point (°C), visibility (statute miles), wind speed (knots), wind direction (degrees), pressure (hPa), conditions and raw METAR when available. A cached observation may be returned with `stale: true` after an upstream error; without an observation the endpoint returns `503`. The Aviation Weather Center is an external source and may be unavailable.
 

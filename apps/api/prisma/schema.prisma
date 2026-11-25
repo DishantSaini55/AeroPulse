@@ -55,6 +55,23 @@ enum AlarmLevel {
   CRITICAL
 }
 
+enum IncidentStatus {
+  DETECTED
+  ACKNOWLEDGED
+  ASSIGNED
+  UNDER_INVESTIGATION
+  UNDER_REPAIR
+  VERIFICATION
+  RESOLVED
+}
+
+enum IncidentPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique @db.VarChar(254)
@@ -67,6 +84,11 @@ model User {
   initiatedFailovers FailoverEvent[]
   confirmedDiagnoses FaultDiagnosis[]
   alarmAcknowledgements AlarmAcknowledgement[]
+  assignedIncidents Incident[] @relation("IncidentAssignee")
+  approvedIncidents Incident[] @relation("IncidentApprover")
+  incidentEvents IncidentEvent[]
+  repairRecords RepairRecord[]
+  authorizedReplacements DeviceReplacement[]
 
   @@index([role, active])
 }
@@ -100,6 +122,8 @@ model Device {
   failoversTo     FailoverEvent[] @relation("FailoverTo")
   diagnoses       FaultDiagnosis[]
   alarms          Alarm[]
+  incidents       Incident[]
+  replacements    DeviceReplacement[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
@@ -147,9 +171,83 @@ model Alarm {
   resolvedAt     DateTime?
   simulated      Boolean    @default(true)
   acknowledgements AlarmAcknowledgement[]
+  incident       Incident?
 
   @@index([resolvedAt, level, createdAt(sort: Desc)])
   @@index([deviceId, createdAt(sort: Desc)])
+}
+
+model Incident {
+  id            String           @id @default(uuid()) @db.Uuid
+  alarmId       String           @unique @db.Uuid
+  alarm         Alarm            @relation(fields: [alarmId], references: [id], onDelete: Restrict)
+  deviceId      String           @db.Uuid
+  device        Device           @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  status        IncidentStatus   @default(DETECTED)
+  priority      IncidentPriority
+  description   String           @db.VarChar(500)
+  assignedToId  String?          @db.Uuid
+  assignedTo    User?            @relation("IncidentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  approvedById  String?          @db.Uuid
+  approvedBy    User?            @relation("IncidentApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt    DateTime?
+  repairStartedAt DateTime?
+  repairCompletedAt DateTime?
+  resolvedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  events        IncidentEvent[]
+  repairs       RepairRecord[]
+  replacements  DeviceReplacement[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@index([assignedToId, status])
+}
+
+model IncidentEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  incidentId String   @db.Uuid
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  kind       String   @db.VarChar(32)
+  detail     String   @db.VarChar(2000)
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId, createdAt])
+}
+
+model RepairRecord {
+  id         String   @id @default(uuid()) @db.Uuid
+  incidentId String   @db.Uuid
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  actorId    String   @db.Uuid
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action     String   @db.VarChar(2000)
+  spareParts String[] @default([])
+  cost       Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId, createdAt])
+}
+
+model DeviceReplacement {
+  id             String   @id @default(uuid()) @db.Uuid
+  deviceId       String   @db.Uuid
+  device         Device   @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  incidentId     String?  @db.Uuid
+  incident       Incident? @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  oldUnitSerial  String   @db.VarChar(100)
+  newUnitSerial  String   @db.VarChar(100)
+  reason         String   @db.VarChar(2000)
+  cost           Decimal  @default(0) @db.Decimal(12, 2)
+  authorizedById String   @db.Uuid
+  authorizedBy   User     @relation(fields: [authorizedById], references: [id], onDelete: Restrict)
+  replacedAt     DateTime @default(now())
+
+  @@unique([deviceId, newUnitSerial])
+  @@index([deviceId, replacedAt(sort: Desc)])
 }
 
 model AlarmAcknowledgement {

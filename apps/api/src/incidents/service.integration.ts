@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import type { Server } from 'node:http';
+import { createDb } from '../db.js';
+import { createApp } from '../app.js';
+import type { AuthProvider } from '../auth.js';
+import { IncidentService } from './service.js';
+
+const db = createDb();
+const marker = randomUUID();
+let alarmId = '';
+let incidentId = '';
+let escalatedAlarmId = '';
+let escalatedIncidentId = '';
+let engineerId = '';
+let supervisorId = '';
+let server: Server | undefined;
+
+try {
+  const device = await db.device.findUniqueOrThrow({ where: { code: 'ILS-P' }, select: { id: true } });
+  const engineer = await db.user.create({ data: { email: `incident-engineer-${marker}@example.test`, name: 'Test engineer', role: 'MAINTENANCE_ENGINEER', passwordHash: 'integration-test-only' } });
+  engineerId = engineer.id;
+  const supervisor = await db.user.create({ data: { email: `incident-supervisor-${marker}@example.test`, name: 'Test supervisor', role: 'SUPERVISOR', passwordHash: 'integration-test-only' } });
+  supervisorId = supervisor.id;
+  const alarm = await db.alarm.create({ data: { sourceKey: `incident-test:${marker}`, deviceId: device.id, level: 'CRITICAL', initialLevel: 'CRITICAL', message: 'Simulated integration fault', simulated: true } });
+  alarmId = alarm.id;
+  const service = new IncidentService(db);
+  await service.sync();
+  await service.sync();
+  const incidents = await db.incident.findMany({ where: { alarmId } });
+  assert.equal(incidents.length, 1, 'one incident per alarm');
+  incidentId = incidents[0]!.id;
+  const auth: AuthProvider = { login: async () => null, verifyToken: async token => token === 'engineer' ? { id: engineerId, name: engineer.name, email: engineer.email, role: 'MAINTENANCE_ENGINEER', active: true } : token === 'supervisor' ? { id: supervisorId, name: supervisor.name, email: supervisor.email, role: 'SUPERVISOR', active: true } : null };
+  server = createApp(db, undefined, auth, undefined, undefined, undefined, undefined, service).listen(0);
+  await new Promise<void>(resolve => server!.once('listening', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}`;
+  const post = async (path: string, token: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const path = `/api/v1/incidents/${incidentId}`;
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ASSIGNED', assignedToId: engineerId })).status, 409, 'cannot skip a lifecycle step');
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ACKNOWLEDGED' })).status, 200);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'ASSIGNED', assignedToId: engineerId })).status, 403, 'engineer cannot assign');
+  assert.equal((await post(`${path}/transition`, 'supervisor', { status: 'ASSIGNED', assignedToId: engineerId })).status, 200);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'UNDER_INVESTIGATION' })).status, 200);
+  assert.equal((await post(`${path}/comments`, 'engineer', { message: 'Checked logs and telemetry' })).status, 201);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'UNDER_REPAIR' })).status, 200);
+  assert.equal((await post(`${path}/repairs`, 'engineer', { action: 'Replaced simulated fan', spareParts: ['Fan module'], cost: 0.29 })).status, 201);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'VERIFICATION' })).status, 200);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'RESOLVED' })).status, 409, 'active fault blocks resolution');
+  await db.alarm.update({ where: { id: alarmId }, data: { resolvedAt: new Date() } });
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'RESOLVED' })).status, 409, 'urgent incident needs approval');
+  assert.equal((await post(`${path}/approve`, 'engineer', {})).status, 403);
+  assert.equal((await post(`${path}/approve`, 'supervisor', {})).status, 200);
+  assert.equal((await post(`${path}/transition`, 'engineer', { status: 'RESOLVED' })).status, 200);
+  assert.equal((await post('/api/v1/maintenance/ILS-P/replacements', 'engineer', { oldUnitSerial: `old-${marker}`, newUnitSerial: `new-${marker}`, reason: 'Simulated unit replacement', cost: 1.25, incidentId })).status, 403);
+  assert.equal((await post('/api/v1/maintenance/ILS-P/replacements', 'supervisor', { oldUnitSerial: `old-${marker}`, newUnitSerial: `new-${marker}`, reason: 'Simulated unit replacement', cost: 1.25, incidentId })).status, 201);
+  assert.equal((await post('/api/v1/maintenance/ILS-P/replacements', 'supervisor', { oldUnitSerial: `old-${marker}`, newUnitSerial: `new-${marker}`, reason: 'Simulated unit replacement', cost: 1.25, incidentId })).status, 409, 'replacement serial is unique per device');
+  const history = await fetch(`${base}/api/v1/maintenance/ILS-P`, { headers: { authorization: 'Bearer engineer' } });
+  assert.equal(history.status, 200);
+  const data = await history.json() as { data: { incidents: Array<{ id: string; repairDurationMs: number | null }>; replacements: Array<{ newUnitSerial: string }>; recordedRepairCost: number; replacementCost: number } };
+  assert.ok(data.data.incidents.some(item => item.id === incidentId));
+  assert.ok(data.data.incidents.find(item => item.id === incidentId)?.repairDurationMs != null);
+  assert.ok(data.data.replacements.some(item => item.newUnitSerial === `new-${marker}`));
+  assert.ok(data.data.recordedRepairCost >= 0.29);
+  assert.ok(data.data.replacementCost >= 1.25);
+  const filtered = await fetch(`${base}/api/v1/maintenance?device=ILS-P&severity=CRITICAL`, { headers: { authorization: 'Bearer engineer' } });
+  assert.equal(filtered.status, 200);
+  assert.ok((await filtered.json() as { data: Array<{ id: string }> }).data.some(item => item.id === incidentId));
+  const warning = await db.alarm.create({ data: { sourceKey: `incident-escalation-test:${marker}`, deviceId: device.id, level: 'WARNING', initialLevel: 'WARNING', message: 'Simulated escalating fault', simulated: true } });
+  escalatedAlarmId = warning.id;
+  await service.sync();
+  const escalated = await db.incident.findUniqueOrThrow({ where: { alarmId: warning.id } });
+  escalatedIncidentId = escalated.id;
+  assert.equal(escalated.priority, 'MEDIUM');
+  await db.alarm.update({ where: { id: warning.id }, data: { level: 'CRITICAL' } });
+  await service.sync();
+  assert.equal((await db.incident.findUniqueOrThrow({ where: { id: escalated.id } })).priority, 'URGENT');
+  assert.equal(await db.incidentEvent.count({ where: { incidentId: escalated.id, kind: 'PRIORITY_CHANGED' } }), 1);
+  console.log('Incident lifecycle, escalation, permissions, approval, repair, replacement and maintenance filters verified');
+} finally {
+  if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));
+  await db.deviceReplacement.deleteMany({ where: { newUnitSerial: `new-${marker}` } });
+  if (escalatedIncidentId) { await db.incidentEvent.deleteMany({ where: { incidentId: escalatedIncidentId } }); await db.incident.delete({ where: { id: escalatedIncidentId } }); }
+  if (escalatedAlarmId) await db.alarm.delete({ where: { id: escalatedAlarmId } });
+  if (incidentId) {
+    await db.repairRecord.deleteMany({ where: { incidentId } });
+    await db.incidentEvent.deleteMany({ where: { incidentId } });
+    await db.incident.delete({ where: { id: incidentId } });
+  }
+  if (alarmId) await db.alarm.delete({ where: { id: alarmId } });
+  if (engineerId) await db.user.delete({ where: { id: engineerId } });
+  if (supervisorId) await db.user.delete({ where: { id: supervisorId } });
+  await db.$disconnect();
+}

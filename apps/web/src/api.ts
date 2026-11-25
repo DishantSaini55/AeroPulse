@@ -116,6 +116,31 @@ export type Alarm = { id: string; sourceKey: string; level: 'INFORMATION' | 'WAR
 export const getAlarms = async (active: 'true' | 'false' | 'all' = 'true') => (await getJson<{ data: Alarm[] }>(`/api/v1/alarms?limit=100${active === 'all' ? '' : `&active=${active}`}`)).data;
 export const acknowledgeAlarm = (id: string) => postAction(`/api/v1/alarms/${encodeURIComponent(id)}/acknowledge`, {});
 
+export type IncidentStatus = 'DETECTED' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'UNDER_INVESTIGATION' | 'UNDER_REPAIR' | 'VERIFICATION' | 'RESOLVED';
+export type Incident = {
+  id: string; alarmId: string; deviceId: string; status: IncidentStatus; priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'; description: string;
+  createdAt: string; updatedAt: string; resolvedAt: string | null; approvedAt: string | null; repairDurationMs?: number | null;
+  assignedTo: { id: string; name: string } | null; approvedBy: { name: string } | null;
+  device: { code: string; name: string; system: { code: string; name: string } };
+  alarm: { level: string; message?: string; createdAt?: string; resolvedAt: string | null; diagnosis: { suspectedCause?: string; confirmedRootCause: string | null; component?: string; symptoms?: string[]; supportingTelemetry?: Record<string, number> } | null };
+  _count?: { repairs: number };
+  events?: { id: string; kind: string; detail: string; createdAt: string; actor: { name: string } | null }[];
+  repairs?: { id: string; action: string; spareParts: string[]; cost: string; createdAt: string; actor: { name: string } }[];
+};
+export const getIncidents = async (status: 'open' | 'resolved' | 'all', device?: string) => (await getJson<{ data: Incident[] }>(`/api/v1/incidents?status=${status}&limit=100${device ? `&device=${encodeURIComponent(device)}` : ''}`)).data;
+export const getIncident = async (id: string) => (await getJson<{ data: Incident }>(`/api/v1/incidents/${encodeURIComponent(id)}`)).data;
+export const getEngineers = async () => (await getJson<{ data: { id: string; name: string }[] }>('/api/v1/incidents/engineers')).data;
+export const transitionIncident = (id: string, status: IncidentStatus, assignedToId?: string) => postAction(`/api/v1/incidents/${encodeURIComponent(id)}/transition`, { status, assignedToId });
+export const approveIncident = (id: string) => postAction(`/api/v1/incidents/${encodeURIComponent(id)}/approve`, {});
+export const commentIncident = (id: string, message: string) => postAction(`/api/v1/incidents/${encodeURIComponent(id)}/comments`, { message });
+export const recordRepair = (id: string, action: string, spareParts: string[], cost: number) => postAction(`/api/v1/incidents/${encodeURIComponent(id)}/repairs`, { action, spareParts, cost });
+export type DeviceReplacement = { id: string; oldUnitSerial: string; newUnitSerial: string; reason: string; cost: string; replacedAt: string; authorizedBy: { name: string } };
+export type MaintenanceHistory = { device: { code: string; name: string; commissionedAt: string | null; system: { code: string; name: string } }; incidents: Incident[]; replacements: DeviceReplacement[]; failureCount: number; recordedRepairCost: number; replacementCost: number; equipmentDowntimeMs: number; serviceDowntimeMs: number };
+export const getMaintenanceHistory = async (code: string) => (await getJson<{ data: MaintenanceHistory }>(`/api/v1/maintenance/${encodeURIComponent(code)}`)).data;
+export type MaintenanceFilters = { device?: string; system?: string; from?: string; to?: string; severity?: string; rootCause?: string; page?: number };
+export const getMaintenanceRecords = async (filters: MaintenanceFilters) => (await getJson<{ data: Incident[]; total: number; page: number; limit: number }>(`/api/v1/maintenance?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString()}`));
+export const recordReplacement = (code: string, input: { oldUnitSerial: string; newUnitSerial: string; reason: string; cost: number; incidentId?: string }) => postAction(`/api/v1/maintenance/${encodeURIComponent(code)}/replacements`, input);
+
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;
 

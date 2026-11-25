@@ -12,6 +12,8 @@ import type { TelemetrySimulator } from './simulator/service.js';
 import { diagnosticThresholds } from './diagnostics/rules.js';
 import type { Scenario } from './simulator/generator.js';
 import { escalationDelay } from './alarms/service.js';
+import { IncidentError, IncidentService } from './incidents/service.js';
+import { incidentRoutes } from './incidents/routes.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -34,7 +36,7 @@ const userUpdate = z.strictObject({
   active: z.boolean().optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one field is required');
 
-export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator) {
+export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator, incidents?: IncidentService) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -434,6 +436,8 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     response.status(201).location(`/api/v1/notes/${note.id}`).json({ data: note, simulated: true });
   });
 
+  if (db) app.use('/api/v1', incidentRoutes(db, incidents ?? new IncidentService(db)));
+
   app.use((_request, response) => {
     response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
   });
@@ -445,6 +449,11 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     }
     if (error instanceof SyntaxError && 'body' in error) {
       response.status(400).json({ error: { code: 'INVALID_JSON', message: 'Malformed JSON body' } });
+      return;
+    }
+    if (error instanceof IncidentError) {
+      const status = error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : 409;
+      response.status(status).json({ error: { code: error.code, message: error.message } });
       return;
     }
     console.error('Unhandled API error', error);

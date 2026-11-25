@@ -2,9 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router';
 import { ArrowUpRight, RefreshCw, ShieldCheck, ShieldX } from 'lucide-react';
 import { getRedundancy } from './api';
+import { formatUtcTime } from './time';
 import './redundancy.css';
 
-const displayTime = (value: string | null) => value ? new Date(value).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Never';
+const displayTime = (value: string | null) => value ? formatUtcTime(value) : 'Never';
 
 export function RedundancyPage({ now, streamConnected }: { now: number; streamConnected: boolean }) {
   const query = useQuery({ queryKey: ['redundancy'], queryFn: getRedundancy, refetchInterval: streamConnected ? 15000 : 5000 });

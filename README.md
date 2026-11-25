@@ -76,3 +76,4 @@ Invoke-RestMethod -Uri 'http://localhost:4000/api/v1/weather/vidp' -Headers $hea
 The API lives in `apps/api`, and the React console in `apps/web`. `packages/shared` and `infra` reserve space for later components. Planned technologies will be introduced as the related features are implemented.
 
 Equipment readings are labelled simulated. Public aviation weather observations are labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions.
+Operational timestamps in the console are displayed in UTC, independent of the browser's local timezone.

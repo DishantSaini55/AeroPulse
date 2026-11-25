@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
+import { getToken } from './auth';
 
 export type TelemetryEvent = { recordedAt: string; deviceCodes: string[]; simulated: true };
 
@@ -10,7 +11,7 @@ export function useRealtime() {
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
 
   useEffect(() => {
-    const socket = io({ path: '/socket.io', autoConnect: false });
+    const socket = io({ path: '/socket.io', autoConnect: false, auth: callback => callback({ token: getToken() }) });
     const sync = () => {
       setConnected(true);
       // Socket.IO events missed while disconnected are recovered from REST state.
@@ -28,13 +29,17 @@ export function useRealtime() {
     };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);
-    socket.on('connect_error', disconnect);
+    const connectError = (error: Error) => {
+      disconnect();
+      if (error.message === 'Unauthorized') window.dispatchEvent(new Event('aeropulse:unauthorized'));
+    };
+    socket.on('connect_error', connectError);
     socket.on('telemetry:batch', onBatch);
     socket.connect();
     return () => {
       socket.off('connect', sync);
       socket.off('disconnect', disconnect);
-      socket.off('connect_error', disconnect);
+      socket.off('connect_error', connectError);
       socket.off('telemetry:batch', onBatch);
       socket.disconnect();
     };

@@ -1,8 +1,11 @@
-import express, { type ErrorRequestHandler } from 'express';
+import express, { type ErrorRequestHandler, type RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { rateLimit } from 'express-rate-limit';
 import type { Database } from './db.js';
 import type { WeatherService } from './weather/service.js';
+import { normalizeEmail, passwordSchema, type AuthProvider, type PublicUser } from './auth.js';
+import type { UserRole } from './generated/prisma/enums.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -11,8 +14,21 @@ const noteInput = z.strictObject({
 
 type Note = z.infer<typeof noteInput> & { id: string; createdAt: string };
 
-// Each app instance owns its own temporary data until Phase 3 adds PostgreSQL.
-export function createApp(db?: Database, weather?: WeatherService) {
+// Operations notes are deliberately temporary and scoped to one API process.
+const roleSchema = z.enum(['ADMINISTRATOR', 'SUPERVISOR', 'MAINTENANCE_ENGINEER']);
+const userInput = z.strictObject({
+  email: z.email().max(254),
+  name: z.string().trim().min(2).max(120),
+  password: passwordSchema,
+  role: roleSchema,
+});
+const userUpdate = z.strictObject({
+  name: z.string().trim().min(2).max(120).optional(),
+  role: roleSchema.optional(),
+  active: z.boolean().optional(),
+}).refine(value => Object.keys(value).length > 0, 'At least one field is required');
+
+export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -21,6 +37,110 @@ export function createApp(db?: Database, weather?: WeatherService) {
 
   app.get('/api/v1/health', (_request, response) => {
     response.json({ status: 'ok', service: 'aeropulse-api' });
+  });
+
+  app.post('/api/v1/auth/login', rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }), async (request, response) => {
+    if (!auth) {
+      response.status(503).json({ error: { code: 'AUTH_UNAVAILABLE', message: 'Authentication is not configured' } });
+      return;
+    }
+    const input = z.strictObject({ email: z.email(), password: z.string() }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Valid email and password are required' } });
+      return;
+    }
+    const result = await auth.login(input.data.email, input.data.password);
+    if (!result) {
+      response.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } });
+      return;
+    }
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(result);
+  });
+
+  const requireAuth: RequestHandler = async (request, response, next) => {
+    if (!auth) {
+      response.status(503).json({ error: { code: 'AUTH_UNAVAILABLE', message: 'Authentication is not configured' } });
+      return;
+    }
+    const match = /^Bearer (\S+)$/i.exec(request.get('authorization') ?? '');
+    const user = match ? await auth.verifyToken(match[1]!) : null;
+    if (!user) {
+      response.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+      return;
+    }
+    response.locals.user = user;
+    next();
+  };
+  app.use('/api/v1', requireAuth);
+
+  const requireRole = (...roles: UserRole[]): RequestHandler => (_request, response, next) => {
+    const user = response.locals.user as PublicUser;
+    if (!roles.includes(user.role)) {
+      response.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+      return;
+    }
+    next();
+  };
+
+  app.get('/api/v1/auth/me', (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
+    response.json({ user: response.locals.user as PublicUser });
+  });
+
+  app.get('/api/v1/users', requireRole('ADMINISTRATOR'), async (_request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const users = await db.user.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, email: true, name: true, role: true, active: true, createdAt: true } });
+    response.json({ data: users });
+  });
+
+  app.post('/api/v1/users', requireRole('ADMINISTRATOR'), async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = userInput.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid user details', details: parsed.error.issues.map(({ path, message }) => ({ field: path.join('.'), message })) } });
+      return;
+    }
+    const bcrypt = await import('bcrypt');
+    try {
+      const user = await db.user.create({
+        data: {
+          email: normalizeEmail(parsed.data.email), name: parsed.data.name, role: parsed.data.role,
+          passwordHash: await bcrypt.default.hash(parsed.data.password, 12),
+        },
+        select: { id: true, email: true, name: true, role: true, active: true, createdAt: true },
+      });
+      response.status(201).json({ data: user });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+        response.status(409).json({ error: { code: 'EMAIL_EXISTS', message: 'Email already exists' } });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.patch('/api/v1/users/:id', requireRole('ADMINISTRATOR'), async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = userUpdate.safeParse(request.body);
+    if (!parsed.success || !z.uuid().safeParse(request.params.id).success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid user update' } });
+      return;
+    }
+    const id = String(request.params.id);
+    const current = response.locals.user as PublicUser;
+    if (id === current.id && (parsed.data.role && parsed.data.role !== current.role || parsed.data.active === false)) {
+      response.status(409).json({ error: { code: 'SELF_CHANGE_RESTRICTED', message: 'Cannot change your own role or disable your account' } });
+      return;
+    }
+    const existing = await db.user.findUnique({ where: { id } });
+    if (!existing) {
+      response.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found' } });
+      return;
+    }
+    const user = await db.user.update({ where: { id }, data: parsed.data, select: { id: true, email: true, name: true, role: true, active: true, createdAt: true } });
+    if (!user.active) disconnectUser?.(id);
+    response.json({ data: user });
   });
 
   app.get('/api/v1/weather/vidp', async (_request, response) => {
@@ -125,7 +245,7 @@ export function createApp(db?: Database, weather?: WeatherService) {
     response.json({ data: note, simulated: true });
   });
 
-  app.post('/api/v1/notes', (request, response) => {
+  app.post('/api/v1/notes', requireRole('ADMINISTRATOR'), (request, response) => {
     const parsed = noteInput.safeParse(request.body);
     if (!parsed.success) {
       response.status(400).json({

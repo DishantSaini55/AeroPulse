@@ -1,7 +1,9 @@
 import { io } from 'socket.io-client';
 
 const address = process.env.REALTIME_URL ?? 'http://127.0.0.1:5173';
-const socket = io(address, { path: '/socket.io', transports: ['websocket'], autoConnect: false });
+const token = process.env.REALTIME_TOKEN;
+if (!token) throw new Error('Set REALTIME_TOKEN to a valid login token before checking the protected stream');
+const socket = io(address, { path: '/socket.io', transports: ['websocket'], autoConnect: false, auth: { token } });
 
 try {
   const event = await new Promise((resolve, reject) => {

@@ -31,6 +31,25 @@ enum ServiceAvailability {
   OUTAGE
 }
 
+enum UserRole {
+  ADMINISTRATOR
+  SUPERVISOR
+  MAINTENANCE_ENGINEER
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(254)
+  name         String   @db.VarChar(120)
+  passwordHash String   @db.VarChar(100)
+  role         UserRole
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([role, active])
+}
+
 model LogicalSystem {
   id           String              @id @default(uuid()) @db.Uuid
   code         String              @unique @db.VarChar(32)

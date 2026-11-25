@@ -4,10 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Activity, Antenna, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight,
   Clock3, CloudSun, Database, ExternalLink, HardDrive, LayoutDashboard,
-  Moon, Radio, RefreshCw, Search, Server, Sun, Wifi, WifiOff,
+  LogOut, Moon, Radio, RefreshCw, Search, Server, Sun, Users, Wifi, WifiOff,
 } from 'lucide-react';
 import { getHistory, getSnapshot, getWeather, type Device, type Telemetry, type Weather } from './api';
 import { useRealtime, type TelemetryEvent } from './useRealtime';
+import { useAuth, type User } from './auth';
+import { LoginPage, UsersPage } from './AuthPages';
 
 const TelemetryChart = lazy(() => import('./TelemetryChart'));
 
@@ -163,6 +165,14 @@ function WeatherPage({ weather, loading, error }: { weather?: Weather; loading: 
 }
 
 export default function App() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="auth-screen auth-loading"><RefreshCw className="spin" size={22} /> Checking session…</div>;
+  if (!user) return <LoginPage />;
+  return <OperationsApp user={user} />;
+}
+
+function OperationsApp({ user }: { user: User }) {
+  const { logout } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ap-sidebar') === 'collapsed');
   const [theme, setTheme] = useState(() => localStorage.getItem('ap-theme') ?? 'dark');
   const now = useClock();
@@ -176,14 +186,15 @@ export default function App() {
     { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
     { to: '/infrastructure', label: 'Infrastructure', icon: Server, end: false },
     { to: '/weather', label: 'Aviation weather', icon: CloudSun, end: false },
+    ...(user.role === 'ADMINISTRATOR' ? [{ to: '/users', label: 'User management', icon: Users, end: false }] : []),
   ];
   return <div className={`shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><Antenna size={19} strokeWidth={2.1} /></div><div className="brand-copy"><strong>AeroPulse</strong><span>OPERATIONS CONSOLE</span></div></div>
       <div className="nav-caption">WORKSPACE</div><nav aria-label="Primary navigation">{navigation.map(({ to, label, icon: Icon, end }) => <NavLink to={to} end={end} key={to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} title={collapsed ? label : undefined}><Icon size={17} /><span>{label}</span></NavLink>)}</nav>
-      <div className="sidebar-bottom"><div className="environment"><span className="env-dot" /><div><strong>SIMULATION</strong><span>Local environment</span></div></div><button className="collapse-button" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}<span>{collapsed ? '' : 'Collapse sidebar'}</span></button></div>
+      <div className="sidebar-bottom"><div className="environment"><span className="env-dot" /><div><strong>SIMULATION</strong><span>Local environment</span></div></div><div className="sidebar-account" title={`${user.name} · ${user.email}`}><strong>{user.name}</strong><span>{user.role.replaceAll('_', ' ').toLowerCase()}</span></div><button className="collapse-button" onClick={logout} aria-label="Sign out"><LogOut size={16} /><span>Sign out</span></button><button className="collapse-button" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}<span>{collapsed ? '' : 'Collapse sidebar'}</span></button></div>
     </aside>
     <div className="main-area"><header className="topbar"><div className="topbar-title"><span className="topbar-path">AEROPULSE</span><span className="topbar-divider">/</span><span>Operations workspace</span></div><div className="topbar-actions"><span className={`connection ${snapshot.isError ? 'disconnected' : ''}`}>{snapshot.isError ? <WifiOff size={14} /> : <Wifi size={14} />}{snapshot.isError ? 'API DISCONNECTED' : realtime.connected ? 'LIVE STREAM' : 'POLLING FALLBACK'}</span><span className="topbar-time"><Clock3 size={14} /> {new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button></div></header>
-      <main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
+      <main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} />{user.role === 'ADMINISTRATOR' && <Route path="/users" element={<UsersPage />} />}<Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
       <footer className="footer"><span><span className="footer-led" /> AEROPULSE / INDEPENDENT SIMULATION</span><span>Equipment data: simulated · Weather: external observation</span></footer>
     </div>
   </div>;

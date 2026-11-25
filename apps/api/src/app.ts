@@ -17,6 +17,8 @@ import { incidentRoutes } from './incidents/routes.js';
 import { calculateReliability } from './analytics/metrics.js';
 import { historicalDemoInput, recordedAnalyticsInput } from './analytics/source.js';
 import { recommendationRoutes } from './recommendations/routes.js';
+import { auditMutations } from './reports/audit.js';
+import { reportRoutes } from './reports/routes.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -85,6 +87,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     next();
   };
   app.use('/api/v1', requireAuth);
+  if (db) app.use('/api/v1', auditMutations(db));
 
   const requireRole = (...roles: UserRole[]): RequestHandler => (_request, response, next) => {
     const user = response.locals.user as PublicUser;
@@ -472,6 +475,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
 
   if (db) app.use('/api/v1', incidentRoutes(db, incidents ?? new IncidentService(db)));
   if (db) app.use('/api/v1', recommendationRoutes(db));
+  if (db) app.use('/api/v1', reportRoutes(db));
 
   app.use((_request, response) => {
     response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

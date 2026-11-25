@@ -1,0 +1,15 @@
+.report-filters, .audit-filters { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; padding: 18px; }
+.report-filters label, .audit-filters label { display: grid; gap: 6px; min-width: 145px; color: var(--muted); font-size: 12px; }
+.report-filters input, .report-filters select, .audit-filters input, .audit-filters select { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 4px; padding: 9px; font: inherit; }
+.report-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.report-actions button, .report-pagination button { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--blue); border-radius: 4px; background: var(--blue); color: #fff; padding: 9px 12px; font: inherit; font-size: 12px; }
+.secondary-button { background: transparent !important; border-color: var(--line) !important; color: var(--text) !important; }
+.report-actions button:disabled, .report-pagination button:disabled { opacity: .5; cursor: not-allowed; }
+.report-result { margin-top: 16px; padding: 18px; }
+.report-result .panel-head { align-items: end; }
+.report-result .panel-head small, .report-note { color: var(--muted); font-size: 12px; }
+.report-note { margin: 14px 0 0; line-height: 1.5; }
+.report-path { max-width: 300px; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
+.audit-success { color: var(--green); } .audit-failure { color: var(--red); }
+.report-pagination { display: flex; justify-content: end; gap: 9px; margin-top: 14px; }
+@media (max-width: 700px) { .report-filters, .audit-filters { display: grid; grid-template-columns: 1fr; } .report-filters label, .audit-filters label { min-width: 0; } }

@@ -90,6 +90,7 @@ model User {
   repairRecords RepairRecord[]
   authorizedReplacements DeviceReplacement[]
   recommendationDecisions RecommendationDecision[]
+  auditEvents AuditEvent[]
 
   @@index([role, active])
 }
@@ -157,6 +158,7 @@ model FaultDiagnosis {
 
   @@index([deviceId, detectedAt(sort: Desc)])
   @@index([resolvedAt, severity])
+  @@index([detectedAt(sort: Desc)])
 }
 
 model Alarm {
@@ -207,6 +209,7 @@ model Incident {
   @@index([status, createdAt(sort: Desc)])
   @@index([deviceId, createdAt(sort: Desc)])
   @@index([assignedToId, status])
+  @@index([createdAt(sort: Desc)])
 }
 
 model IncidentEvent {
@@ -234,6 +237,7 @@ model RepairRecord {
   createdAt  DateTime @default(now())
 
   @@index([incidentId, createdAt])
+  @@index([createdAt(sort: Desc)])
 }
 
 model DeviceReplacement {
@@ -252,6 +256,22 @@ model DeviceReplacement {
 
   @@unique([deviceId, newUnitSerial])
   @@index([deviceId, replacedAt(sort: Desc)])
+  @@index([replacedAt(sort: Desc)])
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String   @db.Uuid
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  actorRole  UserRole
+  method     String   @db.VarChar(8)
+  path       String   @db.VarChar(300)
+  statusCode Int
+  occurredAt DateTime @default(now())
+
+  @@index([occurredAt(sort: Desc)])
+  @@index([actorId, occurredAt(sort: Desc)])
+  @@index([statusCode, occurredAt(sort: Desc)])
 }
 
 model RecommendationDecision {

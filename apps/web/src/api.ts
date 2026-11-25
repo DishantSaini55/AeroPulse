@@ -166,6 +166,24 @@ export type RecommendationReport = { data: Recommendation[]; policy: { windowDay
 export const getRecommendations = () => getJson<RecommendationReport>('/api/v1/recommendations', false, 20000);
 export const decideRecommendation = (item: Recommendation, decision: 'APPROVED' | 'DECLINED', note: string) => postAction('/api/v1/recommendations/decisions', { deviceId: item.deviceId, causeKey: item.causeKey, evidenceHash: item.evidenceHash, decision, note });
 
+export type ReportType = 'incidents' | 'repairs' | 'replacements' | 'failovers' | 'audit';
+export type ReportFilters = { type: ReportType; from: string; to: string; device?: string; system?: string };
+export type OperationalReport = { type: ReportType; columns: string[]; rows: Record<string, string | number | null>[]; total: number; queryMs: number; generatedAt: string; from: string; to: string; simulated: true; note: string };
+const reportQuery = (filters: ReportFilters, format: 'json' | 'csv') => new URLSearchParams(Object.entries({ ...filters, format }).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
+export const getReport = (filters: ReportFilters) => getJson<OperationalReport>(`/api/v1/reports?${reportQuery(filters, 'json')}`, false, 20000);
+export async function downloadReportCsv(filters: ReportFilters) {
+  const response = await fetch(`/api/v1/reports?${reportQuery(filters, 'csv')}`, { headers: { authorization: `Bearer ${getToken() ?? ''}` } });
+  if (response.status === 401) window.dispatchEvent(new Event('aeropulse:unauthorized'));
+  if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error?.message ?? `HTTP ${response.status}`); }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(await response.blob());
+  link.download = `aeropulse-${filters.type}-${filters.from}-to-${filters.to}.csv`;
+  document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href);
+}
+export type AuditEvent = { id: string; actorRole: string; method: string; path: string; statusCode: number; occurredAt: string; actor: { name: string; email: string } };
+export type AuditFilters = { page: number; limit?: number; from?: string; to?: string; outcome?: 'all' | 'success' | 'failure' };
+export const getAuditEvents = (filters: AuditFilters) => getJson<{ data: AuditEvent[]; total: number; page: number; limit: number; note: string }>(`/api/v1/audit-events?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString()}`);
+
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;
 

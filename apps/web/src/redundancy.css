@@ -6,12 +6,13 @@
 .redundancy-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 17px; }
 .redundancy-system .panel-head { min-height: 71px; }
 .redundancy-devices { display: grid; }
-.redundancy-device { min-height: 55px; display: grid; grid-template-columns: 75px 1fr 100px 85px 135px; gap: 9px; align-items: center; padding: 9px 20px; border-bottom: 1px solid var(--line-soft); font-size: 11px; }
+.redundancy-device { min-height: 55px; display: grid; grid-template-columns: 75px 1fr 100px 85px 135px auto; gap: 9px; align-items: center; padding: 9px 20px; border-bottom: 1px solid var(--line-soft); font-size: 11px; }
 .redundancy-role { color: var(--faint); font-size: 9px; font-weight: 700; letter-spacing: .7px; }
 .redundancy-device .device-link { display: flex; align-items: center; gap: 4px; font-size: 11px; }
 .redundancy-assignment { color: var(--muted); }
 .redundancy-last { color: var(--faint); text-align: right; }
 .redundancy-foot { display: flex; align-items: center; gap: 7px; color: var(--muted); }
 .redundancy-foot span { margin-left: auto; }
+.redundancy-action { background: var(--surface-alt); color: var(--blue); border: 1px solid var(--line); border-radius: 3px; padding: 7px 9px; font-size: 10px; white-space: nowrap; }.redundancy-action:hover { background: var(--hover); }.redundancy-action:disabled { opacity: .45; cursor: not-allowed; }.redundancy-actions { padding: 12px 20px; border-top: 1px solid var(--line-soft); }.redundancy-event { padding: 9px 20px; color: var(--muted); font-size: 10px; border-top: 1px solid var(--line-soft); }.failover-history { margin-top: 19px; }
 @media (max-width: 1350px) { .redundancy-list { grid-template-columns: 1fr; } }
-@media (max-width: 650px) { .redundancy-summary { grid-template-columns: 1fr; }.redundancy-summary > div { min-height: 63px; border-right: 0; border-bottom: 1px solid var(--line); }.redundancy-device { grid-template-columns: 70px 1fr 90px; }.redundancy-assignment,.redundancy-last { display: none; } }
+@media (max-width: 650px) { .redundancy-summary { grid-template-columns: 1fr; }.redundancy-summary > div { min-height: 63px; border-right: 0; border-bottom: 1px solid var(--line); }.redundancy-device { grid-template-columns: 70px 1fr 90px; }.redundancy-assignment,.redundancy-last { display: none; }.redundancy-device .redundancy-action { grid-column: 2 / 4; justify-self: start; } }

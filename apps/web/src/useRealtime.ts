@@ -18,6 +18,7 @@ export function useRealtime() {
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['history'] });
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
+      void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
     };
     const disconnect = () => setConnected(false);
     const onBatch = (event: unknown) => {
@@ -32,6 +33,7 @@ export function useRealtime() {
     const onStatus = () => {
       void queryClient.invalidateQueries({ queryKey: ['snapshot'] });
       void queryClient.invalidateQueries({ queryKey: ['redundancy'] });
+      void queryClient.invalidateQueries({ queryKey: ['failover-events'] });
     };
     socket.on('connect', sync);
     socket.on('disconnect', disconnect);

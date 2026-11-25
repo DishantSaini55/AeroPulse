@@ -137,3 +137,18 @@ test('scheduler repeats ticks and stops cleanly', { skip: !process.env.DATABASE_
   assert.equal(events.length, stoppedAt);
   await db.$disconnect();
 });
+
+test('administrator demo can pause and resume one simulated heartbeat', { skip: !process.env.DATABASE_URL }, async () => {
+  const db = createDb();
+  const simulator = new TelemetrySimulator(db);
+  const at = new Date(Date.now() - 2 * 86_400_000);
+  simulator.setHeartbeatPaused('RADAR-P', true);
+  assert.equal(simulator.isHeartbeatPaused('RADAR-P'), true);
+  await simulator.tick(at);
+  assert.equal(await db.heartbeat.count({ where: { device: { code: 'RADAR-P' }, recordedAt: at } }), 0);
+  assert.equal(await db.heartbeat.count({ where: { device: { code: 'RADAR-S' }, recordedAt: at } }), 1);
+  simulator.setHeartbeatPaused('RADAR-P', false);
+  await simulator.tick(new Date(at.getTime() + 5000));
+  assert.equal(await db.heartbeat.count({ where: { device: { code: 'RADAR-P' }, recordedAt: new Date(at.getTime() + 5000) } }), 1);
+  await db.$disconnect();
+});

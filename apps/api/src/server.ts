@@ -5,7 +5,8 @@ import { WeatherService } from './weather/service.js';
 import { createServer } from 'node:http';
 import { attachRealtime } from './realtime.js';
 import { AuthService, requireJwtSecret } from './auth.js';
-import { HeartbeatMonitor, heartbeatPolicyFromEnv } from './heartbeat/monitor.js';
+import { heartbeatPolicyFromEnv } from './heartbeat/monitor.js';
+import { RedundancyManager } from './failover/manager.js';
 
 const port = Number(process.env.PORT ?? 4000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -18,12 +19,12 @@ const auth = new AuthService(db, requireJwtSecret());
 const weather = new WeatherService(db);
 const heartbeatPolicy = heartbeatPolicyFromEnv();
 let io: ReturnType<typeof attachRealtime>;
-const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy));
-io = attachRealtime(server, auth);
 const simulator = new TelemetrySimulator(db, 5000, event => io.emit('telemetry:batch', event));
-const heartbeatMonitor = new HeartbeatMonitor(db, heartbeatPolicy, change => io.emit('status:changed', change));
+const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => io.emit('status:changed', change));
+const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator));
+io = attachRealtime(server, auth);
 simulator.start();
-heartbeatMonitor.start();
+redundancyManager.start();
 weather.start();
 server.listen(port, () => {
   console.log(`AeroPulse API listening on http://localhost:${port}`);
@@ -31,7 +32,7 @@ server.listen(port, () => {
 
 async function shutdown() {
   await simulator.stop();
-  await heartbeatMonitor.stop();
+  await redundancyManager.stop();
   await weather.stop();
   await new Promise<void>(resolve => io.close(() => resolve()));
   await db.$disconnect();

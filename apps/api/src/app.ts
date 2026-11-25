@@ -7,6 +7,8 @@ import type { WeatherService } from './weather/service.js';
 import { normalizeEmail, passwordSchema, type AuthProvider, type PublicUser } from './auth.js';
 import type { UserRole } from './generated/prisma/enums.js';
 import { heartbeatPolicyFromEnv, type HeartbeatPolicy } from './heartbeat/monitor.js';
+import { FailbackError, type RedundancyManager } from './failover/manager.js';
+import type { TelemetrySimulator } from './simulator/service.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -29,7 +31,7 @@ const userUpdate = z.strictObject({
   active: z.boolean().optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one field is required');
 
-export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv()) {
+export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator) {
   const app = express();
   const notes = new Map<string, Note>();
 
@@ -188,7 +190,10 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     }
     const systems = await db.logicalSystem.findMany({
       orderBy: { code: 'asc' },
-      include: { devices: { orderBy: { role: 'asc' }, include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } } },
+      include: {
+        devices: { orderBy: { role: 'asc' }, include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } },
+        failoverEvents: { take: 1, orderBy: { detectedAt: 'desc' }, select: { id: true, action: true, result: true, detectedAt: true, durationMs: true, reason: true } },
+      },
     });
     response.json({
       recordedAt: new Date().toISOString(), simulated: true, policy: heartbeatPolicy,
@@ -197,15 +202,65 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
           id: device.id, code: device.code, name: device.name, role: device.role,
           health: device.health, activationState: device.activationState,
           latestHeartbeatAt: heartbeats[0]?.recordedAt ?? null,
+          heartbeatPaused: simulator?.isHeartbeatPaused(device.code) ?? false,
         }));
         return {
           id: system.id, code: system.code, name: system.name, availability: system.availability,
           activeDeviceCode: devices.find(device => device.activationState === 'ACTIVE')?.code ?? null,
           standbyReady: devices.some(device => device.activationState === 'STANDBY' && device.health === 'HEALTHY'),
+          lastFailover: system.failoverEvents[0] ?? null,
           devices,
         };
       }),
     });
+  });
+
+  app.get('/api/v1/failover-events', async (request, response) => {
+    if (!db) throw new Error('Database unavailable');
+    const parsed = z.coerce.number().int().min(1).max(100).default(30).safeParse(request.query.limit);
+    if (!parsed.success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid limit' } });
+      return;
+    }
+    const events = await db.failoverEvent.findMany({
+      take: parsed.data, orderBy: { detectedAt: 'desc' },
+      include: { system: { select: { code: true, name: true } }, fromDevice: { select: { code: true } }, toDevice: { select: { code: true } }, initiatedBy: { select: { name: true } } },
+    });
+    response.json({ data: events, simulated: true });
+  });
+
+  app.post('/api/v1/systems/:code/failback', requireRole('ADMINISTRATOR', 'SUPERVISOR'), async (request, response) => {
+    if (!redundancy) {
+      response.status(503).json({ error: { code: 'REDUNDANCY_UNAVAILABLE', message: 'Redundancy manager is unavailable' } });
+      return;
+    }
+    try {
+      const event = await redundancy.failback(String(request.params.code).toUpperCase(), (response.locals.user as PublicUser).id);
+      response.json({ data: event, simulated: true });
+    } catch (error) {
+      if (!(error instanceof FailbackError)) throw error;
+      response.status(error.code === 'NOT_FOUND' ? 404 : 409).json({ error: { code: error.code, message: error.message } });
+    }
+  });
+
+  app.post('/api/v1/simulation/devices/:code/heartbeat', requireRole('ADMINISTRATOR'), async (request, response) => {
+    if (!db || !simulator) {
+      response.status(503).json({ error: { code: 'SIMULATOR_UNAVAILABLE', message: 'Simulator is unavailable' } });
+      return;
+    }
+    const parsed = z.strictObject({ paused: z.boolean() }).safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Expected paused boolean' } });
+      return;
+    }
+    const code = String(request.params.code).toUpperCase();
+    const device = await db.device.findUnique({ where: { code }, select: { id: true } });
+    if (!device) {
+      response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
+      return;
+    }
+    simulator.setHeartbeatPaused(code, parsed.data.paused);
+    response.json({ data: { code, heartbeatPaused: parsed.data.paused }, simulated: true });
   });
 
   app.get('/api/v1/monitoring/snapshot', async (_request, response) => {

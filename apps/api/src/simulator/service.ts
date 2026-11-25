@@ -10,6 +10,7 @@ export class TelemetrySimulator {
   private pending?: Promise<boolean>;
   private readonly generator = new TelemetryGenerator();
   private readonly scenarios = new Map<string, Scenario>();
+  private readonly pausedHeartbeats = new Set<string>();
 
   constructor(
     private readonly db: Database,
@@ -21,6 +22,13 @@ export class TelemetrySimulator {
   setScenario(deviceCode: string, scenario: Scenario) {
     this.scenarios.set(deviceCode, scenario);
   }
+
+  setHeartbeatPaused(deviceCode: string, paused: boolean) {
+    if (paused) this.pausedHeartbeats.add(deviceCode);
+    else this.pausedHeartbeats.delete(deviceCode);
+  }
+
+  isHeartbeatPaused(deviceCode: string) { return this.pausedHeartbeats.has(deviceCode); }
 
   async tick(at = new Date()) {
     if (this.running) return false;
@@ -36,7 +44,7 @@ export class TelemetrySimulator {
       await this.db.$transaction(async (transaction) => {
         await transaction.telemetryReading.createMany({ data: readings });
         await transaction.heartbeat.createMany({
-          data: devices.map((device) => ({ deviceId: device.id, recordedAt: at, simulated: true })),
+          data: devices.filter(device => !this.pausedHeartbeats.has(device.code)).map((device) => ({ deviceId: device.id, recordedAt: at, simulated: true })),
         });
       });
       try {

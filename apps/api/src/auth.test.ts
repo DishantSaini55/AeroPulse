@@ -46,6 +46,9 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     const engineerHeaders = { authorization: `Bearer ${engineerResult.token}` };
     assert.equal((await fetch(`${url}/api/v1/systems`, { headers: engineerHeaders })).status, 200);
     assert.equal((await fetch(`${url}/api/v1/users`, { headers: engineerHeaders })).status, 403);
+    assert.equal((await fetch(`${url}/api/v1/systems/RADAR/failback`, { method: 'POST', headers: engineerHeaders })).status, 403);
+    assert.equal((await fetch(`${url}/api/v1/simulation/devices/RADAR-P/heartbeat`, { method: 'POST', headers: { ...engineerHeaders, 'content-type': 'application/json' }, body: '{"paused":true}' })).status, 403);
+    assert.equal((await fetch(`${url}/api/v1/failover-events`, { headers: engineerHeaders })).status, 200);
     assert.equal((await fetch(`${url}/api/v1/users`, { headers: adminHeaders })).status, 200);
     const created = await fetch(`${url}/api/v1/users`, {
       method: 'POST', headers: { ...adminHeaders, 'content-type': 'application/json' },

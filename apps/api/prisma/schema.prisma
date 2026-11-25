@@ -37,6 +37,17 @@ enum UserRole {
   MAINTENANCE_ENGINEER
 }
 
+enum FailoverAction {
+  AUTOMATIC_FAILOVER
+  MANUAL_FAILBACK
+}
+
+enum FailoverResult {
+  SUCCESS
+  NO_HEALTHY_STANDBY
+  BLOCKED
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique @db.VarChar(254)
@@ -46,6 +57,7 @@ model User {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  initiatedFailovers FailoverEvent[]
 
   @@index([role, active])
 }
@@ -56,6 +68,7 @@ model LogicalSystem {
   name         String              @unique @db.VarChar(100)
   availability ServiceAvailability @default(AVAILABLE)
   devices      Device[]
+  failoverEvents FailoverEvent[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 }
@@ -74,9 +87,33 @@ model Device {
   updatedAt       DateTime        @updatedAt
   telemetry       TelemetryReading[]
   heartbeats      Heartbeat[]
+  failoversFrom   FailoverEvent[] @relation("FailoverFrom")
+  failoversTo     FailoverEvent[] @relation("FailoverTo")
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
+}
+
+model FailoverEvent {
+  id              String          @id @default(uuid()) @db.Uuid
+  systemId        String          @db.Uuid
+  system          LogicalSystem   @relation(fields: [systemId], references: [id], onDelete: Restrict)
+  fromDeviceId    String?         @db.Uuid
+  fromDevice      Device?         @relation("FailoverFrom", fields: [fromDeviceId], references: [id], onDelete: Restrict)
+  toDeviceId      String?         @db.Uuid
+  toDevice        Device?         @relation("FailoverTo", fields: [toDeviceId], references: [id], onDelete: Restrict)
+  initiatedById   String?         @db.Uuid
+  initiatedBy     User?           @relation(fields: [initiatedById], references: [id], onDelete: SetNull)
+  action          FailoverAction
+  result          FailoverResult
+  reason          String          @db.VarChar(300)
+  detectedAt      DateTime
+  completedAt     DateTime
+  durationMs      Int
+  simulated       Boolean         @default(true)
+
+  @@index([systemId, detectedAt(sort: Desc)])
+  @@index([result, detectedAt(sort: Desc)])
 }
 
 model TelemetryReading {

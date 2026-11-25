@@ -81,10 +81,23 @@ export type Redundancy = {
   data: {
     id: string; code: string; name: string; availability: 'AVAILABLE' | 'DEGRADED' | 'OUTAGE';
     activeDeviceCode: string | null; standbyReady: boolean;
-    devices: { id: string; code: string; name: string; role: 'PRIMARY' | 'SECONDARY'; health: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RECOVERING'; activationState: 'ACTIVE' | 'STANDBY' | 'INELIGIBLE'; latestHeartbeatAt: string | null }[];
+    lastFailover: { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; detectedAt: string; durationMs: number; reason: string } | null;
+    devices: { id: string; code: string; name: string; role: 'PRIMARY' | 'SECONDARY'; health: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RECOVERING'; activationState: 'ACTIVE' | 'STANDBY' | 'INELIGIBLE'; latestHeartbeatAt: string | null; heartbeatPaused: boolean }[];
   }[];
 };
 export const getRedundancy = () => getJson<Redundancy>('/api/v1/redundancy');
+export type FailoverEvent = { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; reason: string; detectedAt: string; completedAt: string; durationMs: number; system: { code: string; name: string }; fromDevice: { code: string } | null; toDevice: { code: string } | null; initiatedBy: { name: string } | null };
+export const getFailoverEvents = async () => (await getJson<{ data: FailoverEvent[] }>('/api/v1/failover-events?limit=30')).data;
+
+async function postAction(path: string, body: unknown) {
+  const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken() ?? ''}` }, body: JSON.stringify(body) });
+  const result = await response.json();
+  if (response.status === 401) window.dispatchEvent(new Event('aeropulse:unauthorized'));
+  if (!response.ok) throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
+  return result.data;
+}
+export const setHeartbeatPaused = (code: string, paused: boolean) => postAction(`/api/v1/simulation/devices/${encodeURIComponent(code)}/heartbeat`, { paused });
+export const requestFailback = (systemCode: string) => postAction(`/api/v1/systems/${encodeURIComponent(systemCode)}/failback`, {});
 
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;

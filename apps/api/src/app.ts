@@ -16,6 +16,7 @@ import { IncidentError, IncidentService } from './incidents/service.js';
 import { incidentRoutes } from './incidents/routes.js';
 import { calculateReliability } from './analytics/metrics.js';
 import { historicalDemoInput, recordedAnalyticsInput } from './analytics/source.js';
+import { recommendationRoutes } from './recommendations/routes.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -470,6 +471,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   });
 
   if (db) app.use('/api/v1', incidentRoutes(db, incidents ?? new IncidentService(db)));
+  if (db) app.use('/api/v1', recommendationRoutes(db));
 
   app.use((_request, response) => {
     response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

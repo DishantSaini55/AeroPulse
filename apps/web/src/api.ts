@@ -154,6 +154,18 @@ export const getReliability = async (dataset: 'recorded' | 'demo', days: 7 | 30 
 export type AnalyticsTelemetry = { device: string; bucket: 'UTC_HOUR' | 'UTC_DAY'; data: { bucket: string; temperatureC: number | null; cpuPercent: number | null; packetLossPct: number | null }[]; simulated: true };
 export const getAnalyticsTelemetry = (device: string, days: 7 | 30 | 90) => getJson<AnalyticsTelemetry>(`/api/v1/analytics/telemetry?device=${encodeURIComponent(device)}&days=${days}`, false, 20000);
 
+export type RecommendationAction = 'CONTINUE_MONITORING' | 'PREVENTIVE_MAINTENANCE' | 'DETAILED_INVESTIGATION' | 'COMPONENT_REPLACEMENT' | 'EQUIPMENT_REPLACEMENT_REVIEW';
+export type Recommendation = {
+  deviceId: string; deviceCode: string; deviceName: string; systemCode: string; rootCause: string; causeKey: string; evidenceHash: string;
+  action: RecommendationAction; similarFailures: number; component: string; componentFailures: number;
+  repairCount: number; repairCost: number; latestReplacementCost: number | null; projected30DayRepairCost: number | null;
+  equipmentAgeDays: number | null; downtimeMs: number; latestFailureAt: string; rationale: string;
+  decision: { id: string; decision: 'APPROVED' | 'DECLINED'; note: string; decidedAt: string; decidedBy: { name: string } } | null;
+};
+export type RecommendationReport = { data: Recommendation[]; policy: { windowDays: number; monitorAt: number; investigateAt: number; componentAt: number; replacementAt: number }; generatedAt: string; simulated: true; note: string };
+export const getRecommendations = () => getJson<RecommendationReport>('/api/v1/recommendations', false, 20000);
+export const decideRecommendation = (item: Recommendation, decision: 'APPROVED' | 'DECLINED', note: string) => postAction('/api/v1/recommendations/decisions', { deviceId: item.deviceId, causeKey: item.causeKey, evidenceHash: item.evidenceHash, decision, note });
+
 export type ManagedUser = User & { createdAt: string };
 export const getUsers = async () => (await getJson<{ data: ManagedUser[] }>('/api/v1/users')).data;
 

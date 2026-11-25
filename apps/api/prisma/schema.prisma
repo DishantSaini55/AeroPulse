@@ -89,6 +89,7 @@ model User {
   incidentEvents IncidentEvent[]
   repairRecords RepairRecord[]
   authorizedReplacements DeviceReplacement[]
+  recommendationDecisions RecommendationDecision[]
 
   @@index([role, active])
 }
@@ -124,6 +125,7 @@ model Device {
   alarms          Alarm[]
   incidents       Incident[]
   replacements    DeviceReplacement[]
+  recommendationDecisions RecommendationDecision[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])
@@ -250,6 +252,23 @@ model DeviceReplacement {
 
   @@unique([deviceId, newUnitSerial])
   @@index([deviceId, replacedAt(sort: Desc)])
+}
+
+model RecommendationDecision {
+  id            String   @id @default(uuid()) @db.Uuid
+  deviceId      String   @db.Uuid
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  causeKey      String   @db.VarChar(200)
+  evidenceHash  String   @db.Char(64)
+  action        String   @db.VarChar(40)
+  decision      String   @db.VarChar(16)
+  note          String   @db.VarChar(2000)
+  decidedById   String   @db.Uuid
+  decidedBy     User     @relation(fields: [decidedById], references: [id], onDelete: Restrict)
+  decidedAt     DateTime @default(now())
+
+  @@unique([deviceId, causeKey, evidenceHash])
+  @@index([deviceId, decidedAt(sort: Desc)])
 }
 
 model AlarmAcknowledgement {

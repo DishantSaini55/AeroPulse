@@ -1,0 +1,29 @@
+.recommendation-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.recommendation-summary .panel { padding: 18px; display: grid; gap: 7px; }
+.recommendation-summary span, .recommendation-evidence span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+.recommendation-summary strong { font-size: 26px; }
+.recommendation-policy, .recommendation-note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.recommendation-grid { display: grid; gap: 16px; margin-top: 16px; }
+.recommendation-card { padding: 20px; }
+.recommendation-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+.recommendation-head h2 { margin: 6px 0; font-size: 19px; }
+.recommendation-head p, .recommendation-rationale { margin: 6px 0; line-height: 1.5; }
+.recommendation-count { border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; white-space: nowrap; font-size: 12px; }
+.recommendation-count.critical { color: var(--red); border-color: var(--red); }
+.recommendation-evidence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.recommendation-evidence > div { display: grid; gap: 6px; border: 1px solid var(--line-soft); padding: 11px; }
+.recommendation-evidence strong { font-size: 13px; overflow-wrap: anywhere; }
+.recommendation-footer { display: flex; gap: 20px; flex-wrap: wrap; }
+.recommendation-review, .recommendation-decision, .recommendation-awaiting { margin-top: 18px; padding: 16px; border-top: 1px solid var(--line); }
+.recommendation-review label, .recommendation-decision { display: grid; gap: 8px; }
+.recommendation-review label { font-size: 12px; }
+.recommendation-review textarea { min-height: 72px; resize: vertical; width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 10px; }
+.recommendation-review > div { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.recommendation-review button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 13px; border: 1px solid var(--blue); border-radius: 4px; background: var(--blue); color: #fff; font: inherit; font-size: 12px; }
+.recommendation-review button:disabled { opacity: .55; cursor: not-allowed; }
+.recommendation-review .secondary-button { background: transparent; border: 1px solid var(--line); color: var(--text); }
+.recommendation-decision small, .recommendation-awaiting { color: var(--muted); }
+.recommendation-decision.approved strong { color: var(--green); }
+.recommendation-decision.declined strong { color: var(--red); }
+@media (max-width: 850px) { .recommendation-evidence { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .recommendation-summary, .recommendation-evidence { grid-template-columns: 1fr; } .recommendation-head { display: grid; } }

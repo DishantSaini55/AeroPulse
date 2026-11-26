@@ -122,6 +122,18 @@ test('one simulator tick persists 20 readings and heartbeats', { skip: !process.
   }
 });
 
+test('same simulation slot is idempotent across competing simulator instances', { skip: !process.env.DATABASE_URL }, async () => {
+  const db = createDb();
+  const at = new Date(Date.now() - 3 * 86_400_000);
+  const beforeReadings = await db.telemetryReading.count({ where: { recordedAt: at } });
+  const beforeHeartbeats = await db.heartbeat.count({ where: { recordedAt: at } });
+  const [first, second] = await Promise.all([new TelemetrySimulator(db).tick(at), new TelemetrySimulator(db).tick(at)]);
+  assert.deepEqual([first, second].sort(), [false, true]);
+  assert.equal(await db.telemetryReading.count({ where: { recordedAt: at } }), beforeReadings + 20);
+  assert.equal(await db.heartbeat.count({ where: { recordedAt: at } }), beforeHeartbeats + 20);
+  await db.$disconnect();
+});
+
 test('scheduler repeats ticks and stops cleanly', { skip: !process.env.DATABASE_URL }, async () => {
   const db = createDb();
   const events: string[] = [];

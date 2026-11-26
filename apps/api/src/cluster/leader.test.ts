@@ -28,3 +28,22 @@ test('leader lease starts jobs once, loses leadership and releases only its own 
   await leader.stop();
   assert.equal(redis.value, 'owned-by-other-instance');
 });
+
+test('leader immediately stops work when Redis becomes unavailable and only reacquires after a new lease', async () => {
+  const redis = new FakeRedis();
+  const transitions: string[] = [];
+  let available = true;
+  const leader = new LeaderElector(redis, 'leader', 3_000, 500, { onLeader: async () => { transitions.push('leader'); }, onFollower: async () => { transitions.push('follower'); } }, () => available);
+  await leader.start();
+  assert.equal(leader.isLeader(), true);
+  available = false;
+  await leader.dependencyUnavailable();
+  assert.equal(leader.isLeader(), false);
+  assert.deepEqual(transitions, ['leader', 'follower']);
+  redis.value = undefined;
+  available = true;
+  await leader.dependencyAvailable();
+  assert.equal(leader.isLeader(), true);
+  assert.deepEqual(transitions, ['leader', 'follower', 'leader']);
+  await leader.stop();
+});

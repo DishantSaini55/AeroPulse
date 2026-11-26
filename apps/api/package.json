@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "test": "npm run build && node --test dist/**/*.test.js",
     "test:ci": "npm run build && node --test --test-concurrency=1 dist/**/*.test.js",
+    "test:local": "node scripts/run-local-tests.mjs",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "auth:bootstrap": "tsx prisma/bootstrap-admin.ts"

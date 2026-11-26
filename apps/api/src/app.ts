@@ -42,7 +42,9 @@ const userUpdate = z.strictObject({
   active: z.boolean().optional(),
 }).refine(value => Object.keys(value).length > 0, 'At least one field is required');
 
-export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator, incidents?: IncidentService) {
+export type RuntimeStatus = { redis?: 'ready' | 'degraded'; leader?: boolean; backgroundJobs?: boolean };
+
+export function createApp(db?: Database, weather?: WeatherService, auth?: AuthProvider, disconnectUser?: (id: string) => void, heartbeatPolicy: HeartbeatPolicy = heartbeatPolicyFromEnv(), redundancy?: RedundancyManager, simulator?: TelemetrySimulator, incidents?: IncidentService, simulationControlAvailable: () => boolean = () => true, runtimeStatus?: () => RuntimeStatus) {
   const app = express();
   const notes = new Map<string, Note>();
   const analyticsCache = new Map<string, { until: number; value: unknown }>();
@@ -54,7 +56,18 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   app.use(express.json({ limit: '16kb' }));
 
   app.get('/api/v1/health', (_request, response) => {
-    response.json({ status: 'ok', service: 'aeropulse-api', instanceId: process.env.INSTANCE_ID ?? 'local' });
+    const runtime = runtimeStatus?.();
+    response.json({ status: runtime?.redis === 'degraded' ? 'degraded' : 'ok', service: 'aeropulse-api', instanceId: process.env.INSTANCE_ID ?? 'local', ...(runtime ? { runtime } : {}) });
+  });
+
+  app.get('/api/v1/ready', async (_request, response) => {
+    try {
+      if (!db) throw new Error('Database unavailable');
+      await db.$queryRawUnsafe('SELECT 1');
+      response.json({ status: 'ready', ...(runtimeStatus ? { runtime: runtimeStatus() } : {}) });
+    } catch {
+      response.status(503).json({ status: 'not_ready', error: { code: 'DATABASE_UNAVAILABLE', message: 'Database readiness check failed' } });
+    }
   });
 
   app.post('/api/v1/auth/login', rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }), async (request, response) => {
@@ -277,7 +290,9 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
       response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
       return;
     }
-    simulator.setHeartbeatPaused(code, parsed.data.paused);
+    if (!simulationControlAvailable()) { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Redis coordination is reconnecting; retry the simulation control request' } }); return; }
+    try { await simulator.setHeartbeatPaused(code, parsed.data.paused); }
+    catch { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Simulation control could not be synchronized' } }); return; }
     response.json({ data: { code, heartbeatPaused: parsed.data.paused }, simulated: true });
   });
 
@@ -299,7 +314,9 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     if ((['CPU_OVERLOAD', 'MEMORY_OVERLOAD', 'DISK_EXHAUSTION'].includes(scenario.data) && !compute) || (['PACKET_LOSS', 'NETWORK_DISCONNECTION'].includes(scenario.data) && !network) || (scenario.data === 'POWER_FAILURE' && device.system.code !== 'UPS')) {
       response.status(409).json({ error: { code: 'SCENARIO_NOT_SUPPORTED', message: 'This scenario is not supported by this device type' } }); return;
     }
-    simulator.setScenario(code, scenario.data as Scenario);
+    if (!simulationControlAvailable()) { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Redis coordination is reconnecting; retry the simulation control request' } }); return; }
+    try { await simulator.setScenario(code, scenario.data as Scenario); }
+    catch { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Simulation control could not be synchronized' } }); return; }
     response.json({ data: { code, scenario: scenario.data }, simulated: true });
   });
 
@@ -311,7 +328,9 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     const system = await db.logicalSystem.findUnique({ where: { code }, include: { devices: { select: { code: true } } } });
     if (!system) { response.status(404).json({ error: { code: 'NOT_FOUND', message: 'System not found' } }); return; }
     if (scenario.data === 'NETWORK_DISCONNECTION' && ['UPS', 'COOLING'].includes(code)) { response.status(409).json({ error: { code: 'SCENARIO_NOT_SUPPORTED', message: 'Network scenario is not supported by this system' } }); return; }
-    for (const device of system.devices) simulator.setScenario(device.code, scenario.data);
+    if (!simulationControlAvailable()) { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Redis coordination is reconnecting; retry the simulation control request' } }); return; }
+    try { for (const device of system.devices) await simulator.setScenario(device.code, scenario.data); }
+    catch { response.status(503).json({ error: { code: 'DISTRIBUTED_CONTROL_UNAVAILABLE', message: 'Simulation control could not be synchronized' } }); return; }
     response.json({ data: { code, scenario: scenario.data, deviceCodes: system.devices.map(device => device.code) }, simulated: true });
   });
 

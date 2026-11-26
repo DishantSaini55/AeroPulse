@@ -7,22 +7,26 @@ services:
       POSTGRES_PASSWORD: aeropulse
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aeropulse -d aeropulse"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 5s
 
   migrate:
     build:
@@ -54,11 +58,14 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 12
+      start_period: 15s
 
   api-b:
     build:
@@ -72,11 +79,14 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 12
+      start_period: 15s
 
   web:
     build:
@@ -89,6 +99,8 @@ services:
         condition: service_healthy
       api-b:
         condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 10s
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/nginx-health | grep -q ok"]
       interval: 5s

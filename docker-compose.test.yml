@@ -1,0 +1,22 @@
+name: aeropulse-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aeropulse_test
+      POSTGRES_USER: aeropulse_test
+      POSTGRES_PASSWORD: aeropulse_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - aeropulse-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aeropulse_test -d aeropulse_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  aeropulse-test-data:

@@ -26,6 +26,8 @@ const heartbeatPolicy = heartbeatPolicyFromEnv();
 const retention = new RetentionService(db, telemetryRetentionDays());
 let io: ReturnType<typeof attachRealtime>;
 let cluster: Awaited<ReturnType<typeof attachRedisRealtime>>;
+let leadership: Awaited<ReturnType<typeof startLeadership>>;
+let jobsRunning = false;
 const diagnosis = new DiagnosisService(db, heartbeatPolicy.timeoutMs, heartbeatPolicy.expectedIntervalMs);
 const alarms = new AlarmService(db, event => io.emit('alarm:raised', event));
 const incidents = new IncidentService(db, () => io.emit('incident:changed', { simulated: true }));
@@ -37,17 +39,25 @@ const simulator = new TelemetrySimulator(db, 5000, event => {
     await alarms.sync();
     await incidents.sync();
   })().catch(error => console.error('Alarm scan failed', error));
-}, control => { void cluster?.publishControl(control).catch(error => console.error('Simulator control broadcast failed', error)); });
+}, async control => {
+  if (process.env.REDIS_URL && !cluster?.isReady()) throw new Error('Redis distributed control is unavailable');
+  await cluster?.publishControl(control);
+});
 const redundancyManager = new RedundancyManager(db, heartbeatPolicy, change => {
   io.emit('status:changed', change);
   void alarms.sync().then(() => incidents.sync()).catch(error => console.error('Outage incident scan failed', error));
 });
-const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator, incidents));
+const simulationControlAvailable = () => !process.env.REDIS_URL || cluster?.isReady() === true;
+const runtimeStatus = () => ({
+  redis: process.env.REDIS_URL ? (cluster?.isReady() ? 'ready' as const : 'degraded' as const) : undefined,
+  leader: leadership?.isLeader() ?? false,
+  backgroundJobs: jobsRunning,
+});
+const server = createServer(createApp(db, weather, auth, userId => io.to(`user:${userId}`).disconnectSockets(true), heartbeatPolicy, redundancyManager, simulator, incidents, simulationControlAvailable, runtimeStatus));
 io = attachRealtime(server, auth);
-cluster = await attachRedisRealtime(io, process.env.REDIS_URL);
+cluster = attachRedisRealtime(io, process.env.REDIS_URL);
 await cluster?.onControl(control => simulator.applyControl(control));
 
-let jobsRunning = false;
 async function startLeaderJobs() {
   if (jobsRunning) return;
   jobsRunning = true;
@@ -64,16 +74,22 @@ async function stopLeaderJobs() {
   await Promise.all([simulator.stop(), redundancyManager.stop(), weather.stop(), retention.stop()]);
   console.log(`AeroPulse instance ${process.env.INSTANCE_ID ?? 'local'} stopped background jobs`);
 }
-const leadership = await startLeadership(process.env.REDIS_URL, { onLeader: startLeaderJobs, onFollower: stopLeaderJobs });
+leadership = await startLeadership(process.env.REDIS_URL, { onLeader: startLeaderJobs, onFollower: stopLeaderJobs });
 server.listen(port, () => {
   console.log(`AeroPulse API ${process.env.INSTANCE_ID ?? 'local'} listening on http://localhost:${port}; leader=${leadership.isLeader()}`);
 });
 
+server.on('error', error => console.error('HTTP server error', error));
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`AeroPulse API ${process.env.INSTANCE_ID ?? 'local'} is shutting down`);
   await leadership.stop();
+  await new Promise<void>(resolve => server.close(() => resolve()));
   await new Promise<void>(resolve => io.close(() => resolve()));
   await cluster?.close();
   await db.$disconnect();
 }
-process.once('SIGINT', shutdown);
-process.once('SIGTERM', shutdown);
+process.once('SIGINT', () => { void shutdown().catch(error => { console.error('Shutdown failed', error); process.exitCode = 1; }); });
+process.once('SIGTERM', () => { void shutdown().catch(error => { console.error('Shutdown failed', error); process.exitCode = 1; }); });

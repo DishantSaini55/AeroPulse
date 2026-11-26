@@ -1,10 +1,10 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
-import { createClient, type RedisClientType } from 'redis';
 import type { AuthProvider } from './auth.js';
 import type { StatusChange } from './heartbeat/monitor.js';
 import type { AlarmNotice } from './alarms/service.js';
+import { connectInBackground, createResilientRedisClient } from './cluster/redis.js';
 
 export type TelemetryBatchEvent = {
   recordedAt: string;
@@ -45,6 +45,8 @@ export type RealtimeCluster = {
   publishControl: (control: SimulatorControl) => Promise<void>;
   onControl: (listener: (control: SimulatorControl) => void) => Promise<void>;
   close: () => Promise<void>;
+  isReady: () => boolean;
+  health: () => Record<string, string>;
 };
 
 const controlTopic = 'aeropulse:simulator-control';
@@ -55,21 +57,68 @@ function validControl(value: unknown): value is SimulatorControl {
   return typeof candidate.deviceCode === 'string' && ((candidate.kind === 'SCENARIO' && typeof candidate.scenario === 'string') || (candidate.kind === 'HEARTBEAT' && typeof candidate.paused === 'boolean'));
 }
 
-export async function attachRedisRealtime(io: ReturnType<typeof attachRealtime>, redisUrl?: string): Promise<RealtimeCluster | undefined> {
+export function attachRedisRealtime(io: ReturnType<typeof attachRealtime>, redisUrl?: string): RealtimeCluster | undefined {
   if (!redisUrl) return undefined;
-  const publisher = createClient({ url: redisUrl });
-  const adapterSubscriber = publisher.duplicate();
-  const controlSubscriber = publisher.duplicate();
-  await Promise.all([publisher.connect(), adapterSubscriber.connect(), controlSubscriber.connect()]);
-  io.adapter(createAdapter(publisher, adapterSubscriber));
-  return {
-    publishControl: async control => { await publisher.publish(controlTopic, JSON.stringify(control)); },
-    onControl: async listener => {
+  const publisherConnection = createResilientRedisClient(redisUrl, 'socketio-publisher');
+  const adapterConnection = createResilientRedisClient(redisUrl, 'socketio-adapter-subscriber');
+  const controlConnection = createResilientRedisClient(redisUrl, 'simulator-control-subscriber');
+  const publisher = publisherConnection.client;
+  const adapterSubscriber = adapterConnection.client;
+  const controlSubscriber = controlConnection.client;
+  const connections = [publisherConnection, adapterConnection, controlConnection];
+  let adapterAttached = false;
+  let subscribed = false;
+  let closed = false;
+  let controlListener: ((control: SimulatorControl) => void) | undefined;
+
+  const isReady = () => !closed && connections.every(connection => connection.health.isReady());
+  const subscribeControl = async () => {
+    if (!controlListener || subscribed || !controlConnection.health.isReady()) return;
+    try {
       await controlSubscriber.subscribe(controlTopic, message => {
-        try { const control = JSON.parse(message) as unknown; if (validControl(control)) listener(control); }
-        catch { console.error('Ignored invalid simulator control message'); }
+        try {
+          const control = JSON.parse(message) as unknown;
+          if (validControl(control)) controlListener?.(control);
+        } catch { console.error('Ignored invalid simulator control message'); }
       });
+      subscribed = true;
+    } catch (error) {
+      console.error('Simulator control subscription failed', error);
+    }
+  };
+  const activate = () => {
+    if (!isReady()) return;
+    if (!adapterAttached) {
+      io.adapter(createAdapter(publisher, adapterSubscriber));
+      adapterAttached = true;
+    }
+    void subscribeControl();
+  };
+  for (const [connection, name] of [[publisherConnection, 'socketio-publisher'], [adapterConnection, 'socketio-adapter-subscriber'], [controlConnection, 'simulator-control-subscriber']] as const) {
+    connection.health.subscribe(() => activate());
+    connectInBackground(connection.client, connection.health, name);
+  }
+
+  return {
+    publishControl: async control => {
+      if (!isReady()) throw new Error('Distributed simulator control is unavailable while Redis is reconnecting');
+      try { await publisher.publish(controlTopic, JSON.stringify(control)); }
+      catch (error) { console.error('Simulator control publish failed', error); throw error; }
     },
-    close: async () => { await Promise.all([publisher.quit(), adapterSubscriber.quit(), controlSubscriber.quit()]); },
+    onControl: async listener => {
+      if (controlListener) throw new Error('Simulator control listener is already registered');
+      controlListener = listener;
+      await subscribeControl();
+    },
+    isReady,
+    health: () => ({ publisher: publisherConnection.health.getState(), adapterSubscriber: adapterConnection.health.getState(), controlSubscriber: controlConnection.health.getState() }),
+    close: async () => {
+      closed = true;
+      for (const connection of connections) connection.health.close();
+      await Promise.all(connections.map(async connection => {
+        try { await connection.client.quit(); }
+        catch (error) { console.error('Redis client shutdown failed', error); }
+      }));
+    },
   };
 }

@@ -188,6 +188,18 @@ npm.cmd run dev
 
 Open `http://127.0.0.1:5173/` and sign in. Vite proxies `/api` and `/socket.io` to the backend on port 4000. The Redundancy page shows heartbeat recency, active assignment, standby readiness and event history. Administrators can pause an active device's simulated heartbeat to demonstrate failover, then resume it; supervisors and administrators can request failback after primary recovery. Fault Diagnostics shows suspected causes and lets users record investigation results. Administrators can inject device or system scenarios in Simulation Laboratory. In the Docker stack, those commands are broadcast through Redis to the job leader. The desktop-first console supports light/dark themes, search and filters, and a collapsible sidebar. Live telemetry and status events invalidate the relevant REST queries; when the stream is unavailable the frontend polls every five seconds. Socket.IO events are transient, so reconnect re-fetches the durable current state from the API. The browser keeps the JWT in session storage, which clears when its tab session ends.
 
+### Isolated local API test database
+
+Do not run integration tests against a development database. From `apps/api`, start the dedicated test PostgreSQL container, then run the helper. It verifies the connection, applies migrations, seeds the test database and executes the full API suite with an explicit test-only `DATABASE_URL`.
+
+```powershell
+cd D:\AAI\apps\api
+docker compose -f ../../docker-compose.test.yml up -d --wait
+npm.cmd run test:local
+```
+
+The test setup uses the separate `aeropulse_test` database and `aeropulse-test-data` volume on `127.0.0.1:55432`. When finished, run `docker compose -f ../../docker-compose.test.yml down`. Append `-v` only when you intentionally want to erase test data.
+
 With both servers running, set `REALTIME_TOKEN` to a valid token from `POST /api/v1/auth/login`, then run `npm.cmd run check:realtime` from `apps/web` to verify a telemetry batch through the Vite websocket proxy.
 
 On systems where the `npm` PowerShell shim works, `npm` can replace `npm.cmd`. The API listens on port 4000 by default; set `PORT` to use another port.

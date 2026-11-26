@@ -345,6 +345,7 @@ model TelemetryReading {
 
   @@index([deviceId, recordedAt(sort: Desc)])
   @@index([recordedAt])
+  @@unique([deviceId, recordedAt])
 }
 
 model Heartbeat {
@@ -356,6 +357,7 @@ model Heartbeat {
 
   @@index([deviceId, recordedAt(sort: Desc)])
   @@index([recordedAt])
+  @@unique([deviceId, recordedAt])
 }
 
 model WeatherObservation {

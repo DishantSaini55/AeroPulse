@@ -19,7 +19,7 @@ export class MaintenanceService {
   async addPart(id: string, input: { partName: string; partNumber?: string; quantity: number; unitCost: number }, actor: { id: string; role: UserRole }) {
     const order = await this.db.maintenanceWorkOrder.findUnique({ where: { id }, select: { status: true, assignedEngineerId: true } });
     if (!order) throw new MaintenanceError('NOT_FOUND', 'Work order not found');
-    if (order.status === 'COMPLETED') throw new MaintenanceError('COMPLETED', 'Completed work orders are immutable');
+    if (['COMPLETED', 'CANCELLED'].includes(order.status)) throw new MaintenanceError('FINALIZED', 'Finalized work orders are immutable');
     if (!['ADMINISTRATOR', 'SUPERVISOR'].includes(actor.role) && order.assignedEngineerId !== actor.id) throw new MaintenanceError('FORBIDDEN', 'Only assigned engineer may add parts');
     return this.db.workOrderPartUsage.create({ data: { workOrderId: id, ...input } });
   }

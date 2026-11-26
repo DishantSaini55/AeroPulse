@@ -1,8 +1,77 @@
+<div align="center">
+
 # AeroPulse
 
-AeroPulse is an independent airport infrastructure monitoring simulation inspired by concepts observed during an Airports Authority of India CNS internship. It is a portfolio software project and has no connection to operational airport systems or confidential data.
+### Real-time aviation infrastructure monitoring & incident management simulation
 
-## Implementation status
+<p>
+  <a href="https://github.com/DishantSaini55/AeroPulse/actions/workflows/ci.yml"><img src="https://github.com/DishantSaini55/AeroPulse/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" alt="Docker" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
+</p>
+
+<p>
+  A full-stack portfolio simulation for monitoring paired airport-support systems, investigating faults, managing incidents, and demonstrating resilient real-time delivery.
+</p>
+
+<p><strong>Simulation only.</strong> AeroPulse is not connected to operational airport systems, confidential data, or aviation decision-making.</p>
+
+</div>
+
+---
+
+## Why AeroPulse?
+
+Inspired by concepts observed during an Airports Authority of India CNS internship, AeroPulse models an operational workflow in software: simulated device telemetry is received, missed heartbeats and fault patterns are detected, active-standby failover is performed, durable alarms are raised, and incidents continue through repair, verification, reporting, and audit.
+
+| Monitor | Respond | Learn |
+| :--- | :--- | :--- |
+| Telemetry, weather, heartbeat health, and redundancy readiness | Diagnostics, alarms, incidents, approvals, repair records, and controlled failback | Reliability metrics, maintenance history, recurring-failure recommendations, reports, and audit trail |
+
+## Tech stack
+
+<p align="left">
+  <a href="https://react.dev/"><img src="https://skillicons.dev/icons?i=react" height="44" alt="React" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://skillicons.dev/icons?i=ts" height="44" alt="TypeScript" /></a>
+  <a href="https://vite.dev/"><img src="https://skillicons.dev/icons?i=vite" height="44" alt="Vite" /></a>
+  <a href="https://nodejs.org/"><img src="https://skillicons.dev/icons?i=nodejs" height="44" alt="Node.js" /></a>
+  <a href="https://expressjs.com/"><img src="https://skillicons.dev/icons?i=express" height="44" alt="Express" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://skillicons.dev/icons?i=postgres" height="44" alt="PostgreSQL" /></a>
+  <a href="https://www.prisma.io/"><img src="https://skillicons.dev/icons?i=prisma" height="44" alt="Prisma" /></a>
+  <a href="https://redis.io/"><img src="https://skillicons.dev/icons?i=redis" height="44" alt="Redis" /></a>
+  <a href="https://socket.io/"><img src="https://cdn.simpleicons.org/socketdotio/010101" height="44" alt="Socket.IO" /></a>
+  <a href="https://www.docker.com/"><img src="https://skillicons.dev/icons?i=docker" height="44" alt="Docker" /></a>
+  <a href="https://nginx.org/"><img src="https://skillicons.dev/icons?i=nginx" height="44" alt="Nginx" /></a>
+  <a href="https://github.com/features/actions"><img src="https://skillicons.dev/icons?i=githubactions" height="44" alt="GitHub Actions" /></a>
+</p>
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Operations user] --> W[React operations console]
+    W -->|REST + JWT| N[Nginx gateway]
+    W <-->|Socket.IO / WebSocket| N
+    N --> A[API instance A]
+    N --> B[API instance B]
+    A <--> P[(PostgreSQL)]
+    B <--> P
+    A <--> R[(Redis)]
+    B <--> R
+```
+
+**React** renders operational views. **Express** owns validation, permissions, and domain rules. **PostgreSQL + Prisma** store durable history and constraints. **Socket.IO** delivers fresh events while REST remains the authoritative state. **Redis** shares events and elects one background-job leader. **Docker Compose** demonstrates two API instances behind Nginx.
+
+## Highlights
+
+- **Resilient operations:** active-standby failover, heartbeat monitoring, durable failover history, and controlled manual failback.
+- **Incident workflow:** diagnosis → alarm → assignment → repair → verification → resolution, with role-aware approvals.
+- **Evidence-led insights:** reliability metrics, maintenance records, recurring-failure recommendations, UTC reporting, and audit history.
+- **Secure by design:** bcrypt, JWT role enforcement, rate limits, validation, CSP/security headers, request IDs, and log redaction.
+- **Quality gates:** automated API tests, React production build, migrations/seed validation, Compose validation, and Dependabot.
+
+## Implementation details
 
 The current implementation includes a TypeScript Express API, PostgreSQL/Prisma asset registry for ten logical systems and twenty simulated devices, five-second simulated telemetry, heartbeat monitoring, automatic active-standby failover, authorized manual failback, durable failover history, rule-based fault diagnostics, persistent alarms, incident and repair records, reliability analytics, recurring-failure recommendations, operational reports, audit activity, and cached real VIDP METAR observations. A React operations console provides overview, infrastructure, redundancy, fault diagnostics, alarm center, incident workflow, device maintenance history, reliability charts, recommendation reviews, reports, event history, simulation laboratory, device telemetry history, aviation weather and live telemetry views. Socket.IO broadcasts telemetry batches, status changes, alarms and incident changes; the browser refreshes current state through REST on events and reconnects. HTTP polling remains available during disconnection. JWT login protects the API and live stream. Administrators manage users and simulation scenarios; supervisors can assign engineers and approve urgent incident closure; assigned engineers can document investigations and repairs. A Docker Compose demonstration runs two API instances behind Nginx with PostgreSQL and Redis.
 
@@ -70,7 +139,7 @@ Reports provide recorded incident, repair, replacement, failover and audit rows 
 
 ## Docker multi-instance demonstration
 
-Docker Compose starts PostgreSQL, Redis, a one-time migration/seed job, `api-a`, `api-b`, and Nginx-hosted web at `http://localhost:8080`. The API instances share PostgreSQL. Redis provides the Socket.IO adapter, so an event emitted by the single background-job leader reaches clients connected to either API. A Redis lease (`aeropulse:leader`) permits only one instance to run the simulator, diagnostics, alarm sync, redundancy checks and weather refresh. The active leader renews its 10-second lease every 3 seconds; if it stops, the other instance can acquire the lease and start those jobs. Simulator control requests are broadcast through Redis so a request served by either API reaches the leader.
+Docker Compose starts PostgreSQL, Redis, a one-time migration/seed job, `api-a`, `api-b`, and Nginx-hosted web at `http://127.0.0.1:8080`. The API instances share PostgreSQL. Redis provides the Socket.IO adapter, so an event emitted by the single background-job leader reaches clients connected to either API. A Redis lease (`aeropulse:leader`) permits only one instance to run the simulator, diagnostics, alarm sync, redundancy checks and weather refresh. The active leader renews its 10-second lease every 3 seconds; if it stops, the other instance can acquire the lease and start those jobs. Simulator control requests are broadcast through Redis so a request served by either API reaches the leader.
 
 Set a local Docker-only secret before starting; it is intentionally not committed:
 
@@ -79,7 +148,7 @@ $env:AEROPULSE_JWT_SECRET = "use-a-unique-secret-with-at-least-32-bytes"
 docker compose up --build -d
 ```
 
-Check `docker compose ps`, then open `http://localhost:8080`. Seeded inventory is available; create an account with the existing local bootstrap workflow after the stack starts. To demonstrate HTTP continuity, keep the browser open, run `docker compose stop api-a`, and refresh an API-backed page. Nginx retries the remaining healthy API. Restart it with `docker compose start api-a`. To remove containers while retaining volumes, run `docker compose down`; append `-v` only when you explicitly want to erase Docker demo database and Redis data.
+Check `docker compose ps`, then open `http://127.0.0.1:8080`. Seeded inventory is available; create an account with the existing local bootstrap workflow after the stack starts. To demonstrate HTTP continuity, keep the browser open, run `docker compose stop api-a`, and refresh an API-backed page. Nginx retries the remaining healthy API. Restart it with `docker compose start api-a`. To remove containers while retaining volumes, run `docker compose down`; append `-v` only when you explicitly want to erase Docker demo database and Redis data.
 
 The Docker PostgreSQL database is separate from the existing local development database. Bootstrap its first administrator once before signing in:
 
@@ -138,9 +207,20 @@ Invoke-RestMethod -Uri 'http://localhost:4000/api/v1/devices/RADAR-P/telemetry?l
 Invoke-RestMethod -Uri 'http://localhost:4000/api/v1/weather/vidp' -Headers $headers
 ```
 
-## Architecture
+## Repository structure
 
-The API lives in `apps/api`, and the React console in `apps/web`. `packages/shared` and `infra` reserve space for later components. Planned technologies will be introduced as the related features are implemented.
+```text
+AeroPulse/
+├── apps/
+│   ├── api/                 # Express API, Prisma schema, simulator, domain services
+│   └── web/                 # React operations console
+├── infrastructure/nginx/    # Docker gateway configuration
+├── .github/workflows/       # CI pipeline
+└── docker-compose.yml       # Local multi-instance demonstration
+```
 
-Equipment readings are labelled simulated. Public aviation weather observations are labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions.
-Operational timestamps in the console are displayed in UTC, independent of the browser's local timezone.
+## Author
+
+Built by [Dishant Saini](https://github.com/DishantSaini55) as an independent portfolio project inspired by aviation infrastructure concepts.
+
+Equipment readings are labelled simulated. Public aviation weather observations are labelled as external data. AeroPulse is not suitable for operational monitoring or aviation decisions. Operational timestamps in the console are displayed in UTC, independent of the browser's local timezone.

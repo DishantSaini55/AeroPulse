@@ -7,6 +7,22 @@ export class MaintenanceError extends Error { constructor(readonly code: string,
 
 export class MaintenanceService {
   constructor(private readonly db: Database) {}
+  async createPlan(input: { name: string; deviceId: string; category: string; description: string; checklist: string[]; frequency: any; customIntervalDays?: number; advanceNoticeDays: number; estimatedDurationMinutes: number; priority: any; assignedEngineerId?: string }, actorId: string) {
+    const device = await this.db.device.findUnique({ where: { id: input.deviceId }, select: { systemId: true } });
+    if (!device) throw new MaintenanceError('DEVICE_NOT_FOUND', 'Device not found');
+    const days = recurrenceDays(input.frequency, input.customIntervalDays);
+    if (!days) throw new MaintenanceError('INVALID_FREQUENCY', 'Custom interval must be at least one day');
+    if (input.assignedEngineerId) { const engineer = await this.db.user.findUnique({ where: { id: input.assignedEngineerId }, select: { active: true, role: true } }); if (!engineer || !engineer.active || engineer.role !== 'MAINTENANCE_ENGINEER') throw new MaintenanceError('INVALID_ENGINEER', 'Choose an active maintenance engineer'); }
+    const now = new Date();
+    return this.db.maintenancePlan.create({ data: { ...input, systemId: device.systemId, checklist: input.checklist, nextScheduledAt: new Date(now.getTime() + days * 86_400_000), createdById: actorId, updatedById: actorId } });
+  }
+  async addPart(id: string, input: { partName: string; partNumber?: string; quantity: number; unitCost: number }, actor: { id: string; role: UserRole }) {
+    const order = await this.db.maintenanceWorkOrder.findUnique({ where: { id }, select: { status: true, assignedEngineerId: true } });
+    if (!order) throw new MaintenanceError('NOT_FOUND', 'Work order not found');
+    if (order.status === 'COMPLETED') throw new MaintenanceError('COMPLETED', 'Completed work orders are immutable');
+    if (!['ADMINISTRATOR', 'SUPERVISOR'].includes(actor.role) && order.assignedEngineerId !== actor.id) throw new MaintenanceError('FORBIDDEN', 'Only assigned engineer may add parts');
+    return this.db.workOrderPartUsage.create({ data: { workOrderId: id, ...input } });
+  }
   async generateDue(at = new Date()) {
     const plans = await this.db.maintenancePlan.findMany({ where: { active: true, nextScheduledAt: { lte: at } }, take: 100, include: { device: true } });
     for (const plan of plans) {

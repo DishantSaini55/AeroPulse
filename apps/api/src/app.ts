@@ -20,6 +20,7 @@ import { recommendationRoutes } from './recommendations/routes.js';
 import { auditMutations } from './reports/audit.js';
 import { reportRoutes } from './reports/routes.js';
 import { requestLogger, securityHeaders } from './observability.js';
+import { MaintenanceError, MaintenanceService } from './maintenance/service.js';
 
 const noteInput = z.strictObject({
   systemName: z.string().trim().min(1).max(100),
@@ -48,6 +49,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   const app = express();
   const notes = new Map<string, Note>();
   const analyticsCache = new Map<string, { until: number; value: unknown }>();
+  const maintenance = db ? new MaintenanceService(db) : undefined;
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -116,6 +118,11 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     }
     next();
   };
+
+  const maintenancePlanInput = z.strictObject({ name: z.string().trim().min(3).max(140), deviceId: z.uuid(), category: z.string().trim().min(3).max(100), description: z.string().trim().min(3).max(2000), checklist: z.array(z.string().trim().min(1).max(500)).min(1).max(30), frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'HALF_YEARLY', 'YEARLY', 'CUSTOM']), customIntervalDays: z.number().int().min(1).max(3650).optional(), advanceNoticeDays: z.number().int().min(0).max(365).default(7), estimatedDurationMinutes: z.number().int().min(1).max(10080), priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'), assignedEngineerId: z.uuid().optional() }).refine(value => value.frequency !== 'CUSTOM' || value.customIntervalDays, 'Custom frequency requires customIntervalDays');
+  app.get('/api/v1/maintenance/plans', async (_request, response) => { if (!db) throw new Error('Database unavailable'); response.json({ data: await db.maintenancePlan.findMany({ orderBy: { nextScheduledAt: 'asc' }, include: { device: { select: { code: true, name: true } }, assignedEngineer: { select: { name: true } } } }), simulated: true }); });
+  app.post('/api/v1/maintenance/plans', requireRole('ADMINISTRATOR', 'SUPERVISOR'), async (request, response) => { const parsed = maintenancePlanInput.safeParse(request.body); if (!parsed.success || !maintenance) { response.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid maintenance plan' } }); return; } try { response.status(201).json({ data: await maintenance.createPlan(parsed.data, (response.locals.user as PublicUser).id), simulated: true }); } catch (error) { if (error instanceof MaintenanceError) { response.status(409).json({ error: { code: error.code, message: error.message } }); return; } throw error; } });
+  app.get('/api/v1/maintenance/work-orders', async (_request, response) => { if (!db) throw new Error('Database unavailable'); response.json({ data: await db.maintenanceWorkOrder.findMany({ orderBy: { createdAt: 'desc' }, include: { device: { select: { code: true, name: true } }, assignedEngineer: { select: { name: true } } } }), simulated: true }); });
 
   app.get('/api/v1/auth/me', (_request, response) => {
     response.setHeader('Cache-Control', 'no-store');

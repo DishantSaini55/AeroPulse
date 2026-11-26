@@ -368,10 +368,14 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     const alarms = await db.alarm.findMany({
       where: parsed.data.active === 'true' ? { resolvedAt: null } : parsed.data.active === 'false' ? { resolvedAt: { not: null } } : undefined,
       take: parsed.data.limit, orderBy: { createdAt: 'desc' },
-      include: { device: { select: { code: true, name: true, system: { select: { code: true, name: true } } } }, acknowledgements: { select: { userId: true, acknowledgedAt: true, user: { select: { name: true } } } } },
+      include: {
+        device: { select: { code: true, name: true, role: true, system: { select: { code: true, name: true, availability: true, failoverEvents: { take: 1, orderBy: { detectedAt: 'desc' }, select: { result: true, toDevice: { select: { code: true, name: true } } } } } } } },
+        diagnosis: { select: { suspectedCause: true, confirmedRootCause: true, component: true, symptoms: true, supportingTelemetry: true, serviceImpact: true, investigationSteps: true, recoveryAction: true } },
+        acknowledgements: { select: { userId: true, acknowledgedAt: true, user: { select: { name: true } } } },
+      },
     });
     const user = response.locals.user as PublicUser;
-    response.json({ data: alarms.map(({ acknowledgements, ...alarm }) => ({ ...alarm, acknowledged: acknowledgements.length > 0, acknowledgedByMe: acknowledgements.some(item => item.userId === user.id), acknowledgedAt: acknowledgements[0]?.acknowledgedAt ?? null, acknowledgedBy: acknowledgements[0]?.user.name ?? null })), escalationAfterMs: escalationDelay(), simulated: true });
+    response.json({ data: alarms.map(({ acknowledgements, device, ...alarm }) => ({ ...alarm, device: { ...device, system: { ...device.system, failover: device.system.failoverEvents[0] ?? null, failoverEvents: undefined } }, acknowledged: acknowledgements.length > 0, acknowledgedByMe: acknowledgements.some(item => item.userId === user.id), acknowledgedAt: acknowledgements[0]?.acknowledgedAt ?? null, acknowledgedBy: acknowledgements[0]?.user.name ?? null })), escalationAfterMs: escalationDelay(), simulated: true });
   });
 
   app.post('/api/v1/alarms/:id/acknowledge', async (request, response) => {

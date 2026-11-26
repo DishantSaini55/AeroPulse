@@ -1,109 +1,56 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink } from 'react-router';
-import { Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
+import { Bell, BellOff, Settings2, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-react';
 import { acknowledgeAlarm, getAlarms, type Alarm } from './api';
 import { formatUtcDateTime } from './time';
 import type { AlarmNotice } from './useRealtime';
+import { AlarmAudioManager, type AlarmLevel, type AudioPreferences, loadAudioPreferences, saveAudioPreferences } from './alarmAudio';
 import './alarms.css';
 
-function softChime(context: AudioContext, output: AudioNode) {
-  const start = context.currentTime;
-  for (const [frequency, peak, delay] of [[523.25, 0.035, 0], [659.25, 0.025, 0.08]]) {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const at = start + delay;
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(peak, at + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.7);
-    oscillator.connect(gain).connect(output);
-    oscillator.start(at);
-    oscillator.stop(at + 0.71);
-  }
+function AudioPreferencesPanel({ preferences, update, manager }: { preferences: AudioPreferences; update: (next: Partial<AudioPreferences>) => void; manager: AlarmAudioManager }) {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  useEffect(() => {
+    const refresh = () => setVoices(manager.voices());
+    refresh();
+    speechSynthesis?.addEventListener?.('voiceschanged', refresh);
+    return () => speechSynthesis?.removeEventListener?.('voiceschanged', refresh);
+  }, [manager]);
+  const test = async (level: AlarmLevel) => { await manager.activate(); manager.playPattern(level); };
+  return <div className="alarm-preferences" role="dialog" aria-label="Alarm audio preferences">
+    <strong>Alarm audio preferences</strong><small>Settings are local to this browser and never change alarm acknowledgement or incident state.</small>
+    <button onClick={() => void manager.activate()}> {manager.ready ? 'Audio enabled' : 'Enable audio'} </button>
+    <label><input type="checkbox" checked={preferences.soundEnabled} onChange={event => update({ soundEnabled: event.target.checked })} /> Enable alarm sound</label>
+    <label><input type="checkbox" checked={preferences.voiceEnabled} onChange={event => update({ voiceEnabled: event.target.checked })} disabled={!manager.voiceSupported} /> Voice announcements {manager.voiceSupported ? 'available' : 'unavailable'}</label>
+    <label>Master volume <input type="range" min="0" max="1" step="0.05" value={preferences.masterVolume} onChange={event => update({ masterVolume: Number(event.target.value) })} /></label>
+    <label>Voice volume <input type="range" min="0" max="1" step="0.05" value={preferences.voiceVolume} onChange={event => update({ voiceVolume: Number(event.target.value) })} /></label>
+    <label>Speech rate <input type="range" min="0.7" max="1.2" step="0.05" value={preferences.speechRate} onChange={event => update({ speechRate: Number(event.target.value) })} /></label>
+    {voices.length > 0 && <label>Voice <select value={preferences.voiceName} onChange={event => update({ voiceName: event.target.value })}><option value="">English browser default</option>{voices.filter(voice => /^en/i.test(voice.lang)).map(voice => <option key={voice.voiceURI} value={voice.name}>{voice.name}</option>)}</select></label>}
+    <div className="alarm-test-actions"><button onClick={() => void test('WARNING')}>Test warning</button><button onClick={() => void test('MAJOR')}>Test major</button><button onClick={() => void test('CRITICAL')}>Test critical</button><button onClick={() => { if (manager.voiceSupported) { speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance('Simulation test. Alarm voice announcements are enabled.'); utterance.volume = preferences.voiceVolume; utterance.rate = preferences.speechRate; speechSynthesis.speak(utterance); } }}>Test voice</button></div>
+  </div>;
 }
 
-export function AlarmBanner({ notices }: { notices: AlarmNotice[] }) {
+export function AlarmBanner({ notices, connected }: { notices: AlarmNotice[]; connected: boolean }) {
   const query = useQuery({ queryKey: ['alarms', 'true'], queryFn: () => getAlarms('true'), refetchInterval: 10000 });
   const active = query.data ?? [];
-  const activeErrorKeys = active.filter(alarm => alarm.level !== 'INFORMATION').map(alarm => `${alarm.id}:${alarm.level}`);
-  const activeErrorKey = [...activeErrorKeys].sort().join('|');
   const highest = active.some(item => item.level === 'CRITICAL') ? 'CRITICAL' : active.some(item => item.level === 'MAJOR') ? 'MAJOR' : active.some(item => item.level === 'WARNING') ? 'WARNING' : 'INFORMATION';
-  const [enabled, setEnabled] = useState(false);
-  const [muted, setMuted] = useState(() => localStorage.getItem('ap-alarm-muted') === 'true');
-  const [volume, setVolume] = useState(() => Number(localStorage.getItem('ap-alarm-volume') ?? 0.5));
-  const volumeRef = useRef(volume);
-  const context = useRef<AudioContext | null>(null);
-  const output = useRef<GainNode | null>(null);
-  const seen = useRef(new Set<string>());
-  const activeKeys = useRef(new Set(activeErrorKeys));
-  const repeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chimeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  activeKeys.current = new Set(activeErrorKeys);
-  volumeRef.current = volume;
-  function stopPlayback() {
-    if (stopTimer.current) clearTimeout(stopTimer.current);
-    if (chimeTimer.current) clearInterval(chimeTimer.current);
-    stopTimer.current = null;
-    chimeTimer.current = null;
-    output.current?.disconnect();
-    output.current = null;
-  }
-  function stopCycle() {
-    if (repeatTimer.current) clearInterval(repeatTimer.current);
-    repeatTimer.current = null;
-    stopPlayback();
-  }
-  function playTenSeconds() {
-    if (!context.current) return;
-    stopPlayback();
-    const gain = context.current.createGain();
-    gain.gain.value = volumeRef.current;
-    gain.connect(context.current.destination);
-    output.current = gain;
-    softChime(context.current, gain);
-    chimeTimer.current = setInterval(() => { if (context.current && output.current) softChime(context.current, output.current); }, 2500);
-    stopTimer.current = setTimeout(stopPlayback, 10000);
-  }
-  function startCycle() {
-    stopCycle();
-    playTenSeconds();
-    repeatTimer.current = setInterval(() => {
-      if (activeKeys.current.size) playTenSeconds();
-      else stopCycle();
-    }, 60000);
-  }
-  useEffect(() => { localStorage.setItem('ap-alarm-muted', String(muted)); localStorage.setItem('ap-alarm-volume', String(volume)); }, [muted, volume]);
-  useEffect(() => () => { stopCycle(); void context.current?.close(); }, []);
-  useEffect(() => { if (output.current) output.current.gain.value = volume; }, [volume]);
+  const [preferences, setPreferences] = useState(loadAudioPreferences);
+  const [showPreferences, setShowPreferences] = useState(false);
+  const preferenceRef = useRef(preferences); preferenceRef.current = preferences;
+  const manager = useMemo(() => new AlarmAudioManager(() => preferenceRef.current), []);
+  const update = (next: Partial<AudioPreferences>) => setPreferences(current => ({ ...current, ...next, severities: { ...current.severities, ...next.severities } }));
+  useEffect(() => { saveAudioPreferences(preferences); manager.setPreferencesChanged(); if (preferences.muted) manager.stopAll(); }, [preferences, manager]);
+  useEffect(() => () => manager.destroy(), [manager]);
   useEffect(() => {
-    const notice = notices[0];
-    if (!notice || notice.level === 'INFORMATION' || !enabled || muted) return;
-    const key = `${notice.id}:${notice.level}`;
-    if (seen.current.has(key)) return;
-    seen.current.add(key);
-    startCycle();
-  }, [notices, enabled, muted, volume]);
-  useEffect(() => {
-    if (!enabled || muted) { stopCycle(); return; }
-    if (!query.isSuccess) return;
-    if (!activeErrorKeys.length) { stopCycle(); seen.current.clear(); return; }
-    const newError = activeErrorKeys.some(key => !seen.current.has(key));
-    activeErrorKeys.forEach(key => seen.current.add(key));
-    if (newError || !repeatTimer.current) startCycle();
-  }, [activeErrorKey, enabled, muted, query.isSuccess]);
-  async function enable() {
-    context.current ??= new AudioContext();
-    await context.current.resume();
-    if (!muted && activeErrorKeys.length) {
-      activeErrorKeys.forEach(key => seen.current.add(key));
-      startCycle();
+    if (!query.data) return;
+    for (const notice of notices) {
+      const alarm = query.data.find(item => item.id === notice.id);
+      if (alarm) manager.enqueue({ ...alarm, failover: alarm.device.system.failover });
     }
-    setEnabled(true);
-  }
-  return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE ALARM${active.length === 1 ? '' : 'S'}` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls">{!enabled ? <button onClick={() => void enable()}>Enable alarm sound</button> : <><button aria-label={muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => setMuted(value => !value)}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><label>Volume <input aria-label="Alarm volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={event => setVolume(Number(event.target.value))} /></label></>}</div></div>;
+  }, [notices, query.data, manager]);
+  const critical = active.filter(item => item.level === 'CRITICAL').length;
+  const unacknowledgedMajor = active.filter(item => item.level === 'MAJOR' && !item.acknowledged).length;
+  return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE · ${critical} CRITICAL · ${unacknowledgedMajor} UNACK MAJOR` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls"><span title={connected ? 'Socket.IO connected' : 'Socket.IO reconnecting'}>{connected ? <Wifi size={15} /> : <WifiOff size={15} />}</span><button aria-label={preferences.muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => update({ muted: !preferences.muted })}>{preferences.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button aria-label="Alarm audio preferences" onClick={() => setShowPreferences(value => !value)}><Settings2 size={16} /></button>{showPreferences && <AudioPreferencesPanel preferences={preferences} update={update} manager={manager} />}</div></div>;
 }
 
 function AlarmRow({ alarm }: { alarm: Alarm }) {

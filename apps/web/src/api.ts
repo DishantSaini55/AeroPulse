@@ -112,7 +112,7 @@ export async function confirmDiagnosis(id: string, rootCause: string) {
   if (!response.ok) throw new Error(result?.error?.message ?? `HTTP ${response.status}`);
   return result.data as Diagnosis;
 }
-export type Alarm = { id: string; sourceKey: string; level: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; initialLevel: string; message: string; createdAt: string; resolvedAt: string | null; acknowledged: boolean; acknowledgedByMe: boolean; acknowledgedAt: string | null; acknowledgedBy: string | null; device: { code: string; name: string; system: { code: string; name: string } } };
+export type Alarm = { id: string; sourceKey: string; level: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; initialLevel: string; message: string; createdAt: string; resolvedAt: string | null; acknowledged: boolean; acknowledgedByMe: boolean; acknowledgedAt: string | null; acknowledgedBy: string | null; device: { code: string; name: string; role: string; system: { code: string; name: string; availability: string; failover: { result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; toDevice: { code: string; name: string } | null } | null } }; diagnosis: { suspectedCause: string; confirmedRootCause: string | null; component: string; symptoms: string[]; supportingTelemetry: Record<string, number>; serviceImpact: string; investigationSteps: string[]; recoveryAction: string } | null };
 export const getAlarms = async (active: 'true' | 'false' | 'all' = 'true') => (await getJson<{ data: Alarm[] }>(`/api/v1/alarms?limit=100${active === 'all' ? '' : `&active=${active}`}`)).data;
 export const acknowledgeAlarm = (id: string) => postAction(`/api/v1/alarms/${encodeURIComponent(id)}/acknowledge`, {});
 

@@ -17,11 +17,14 @@ export class MaintenanceService {
     return this.db.maintenancePlan.create({ data: { ...input, systemId: device.systemId, checklist: input.checklist, nextScheduledAt: new Date(now.getTime() + days * 86_400_000), createdById: actorId, updatedById: actorId } });
   }
   async addPart(id: string, input: { partName: string; partNumber?: string; quantity: number; unitCost: number }, actor: { id: string; role: UserRole }) {
-    const order = await this.db.maintenanceWorkOrder.findUnique({ where: { id }, select: { status: true, assignedEngineerId: true } });
+    return this.db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "MaintenanceWorkOrder" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    const order = await tx.maintenanceWorkOrder.findUnique({ where: { id }, select: { status: true, assignedEngineerId: true } });
     if (!order) throw new MaintenanceError('NOT_FOUND', 'Work order not found');
     if (['COMPLETED', 'CANCELLED'].includes(order.status)) throw new MaintenanceError('FINALIZED', 'Finalized work orders are immutable');
     if (!['ADMINISTRATOR', 'SUPERVISOR'].includes(actor.role) && order.assignedEngineerId !== actor.id) throw new MaintenanceError('FORBIDDEN', 'Only assigned engineer may add parts');
-    return this.db.workOrderPartUsage.create({ data: { workOrderId: id, ...input } });
+    return tx.workOrderPartUsage.create({ data: { workOrderId: id, ...input } });
+    });
   }
   async generateDue(at = new Date()) {
     const plans = await this.db.maintenancePlan.findMany({ where: { active: true, nextScheduledAt: { lte: at } }, take: 100, include: { device: true } });
@@ -41,13 +44,14 @@ export class MaintenanceService {
       await tx.$queryRaw`SELECT "id" FROM "MaintenanceWorkOrder" WHERE "id" = ${id}::uuid FOR UPDATE`;
       const order = await tx.maintenanceWorkOrder.findUnique({ where: { id }, include: { checklistItems: true } });
       if (!order) throw new MaintenanceError('NOT_FOUND', 'Work order not found');
+      if (['COMPLETED', 'CANCELLED'].includes(order.status)) throw new MaintenanceError('FINALIZED', 'Finalized work order is immutable');
+      if (next === 'IN_PROGRESS' || next === 'COMPLETED') throw new MaintenanceError('ACTIVATION_SAFETY_PENDING', 'Start and completion require Prompt 4C');
       const manager = actor.role === 'ADMINISTRATOR' || actor.role === 'SUPERVISOR';
       if (!manager && order.assignedEngineerId !== actor.id) throw new MaintenanceError('FORBIDDEN', 'Only the assigned engineer may update this work order');
       if (next === 'CANCELLED' && !manager) throw new MaintenanceError('FORBIDDEN', 'Supervisor cancellation required');
       if (ordered.indexOf(next) !== ordered.indexOf(order.status) + 1 && !['ON_HOLD', 'CANCELLED', 'REJECTED'].includes(next)) throw new MaintenanceError('INVALID_TRANSITION', 'Invalid work order transition');
       if (next === 'VERIFICATION' && order.checklistItems.some(item => !item.completed)) throw new MaintenanceError('CHECKLIST_INCOMPLETE', 'Complete every checklist item before verification');
-      const now = new Date();
-      const updated = await tx.maintenanceWorkOrder.update({ where: { id }, data: { status: next, actualStartAt: next === 'IN_PROGRESS' ? now : undefined, actualCompletionAt: next === 'COMPLETED' ? now : undefined, completedAt: next === 'COMPLETED' ? now : undefined } });
+      const updated = await tx.maintenanceWorkOrder.update({ where: { id }, data: { status: next } });
       await tx.workOrderStatusHistory.create({ data: { workOrderId: id, fromStatus: order.status, toStatus: next, actorId: actor.id, note } });
       return updated;
     });

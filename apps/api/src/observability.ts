@@ -5,6 +5,8 @@ import type { PublicUser } from './auth.js';
 export function securityHeaders(): RequestHandler {
   return (_request, response, next) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('X-DNS-Prefetch-Control', 'off');
+    response.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');

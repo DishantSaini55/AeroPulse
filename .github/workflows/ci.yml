@@ -41,10 +41,14 @@ jobs:
           cache: npm
           cache-dependency-path: apps/api/package-lock.json
       - run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npx prisma db seed
-      - run: npm run test:ci
+      - name: Backend regression and production compilation
+        run: npm run test:ci
+        timeout-minutes: 30
 
   web-and-compose:
     runs-on: ubuntu-latest
@@ -57,18 +61,29 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - name: Build web
         working-directory: apps/web
-        run: |
-          npm ci
-          npm run lint
-          npm run test:audio
-          npm run test:unit
-          npm run build
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: apps/web
+        run: npm audit --omit=dev --audit-level=high
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+      - name: Audio and voice regression
+        working-directory: apps/web
+        run: npm run test:audio
+      - name: Frontend unit and component tests
+        working-directory: apps/web
+        run: npm run test:unit
+      - name: Web TypeScript and production build
+        working-directory: apps/web
+        run: npm run build
       - name: Install Chromium for browser tests
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
       - name: Browser tests
         working-directory: apps/web
         run: npm run test:e2e
+        timeout-minutes: 5
       - name: Preserve browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

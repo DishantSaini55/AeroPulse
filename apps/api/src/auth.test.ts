@@ -37,6 +37,9 @@ test('JWT login, backend roles and disabled-user revocation', { skip: !process.e
     const adminResponse = await login(admin.email.toUpperCase(), password);
     assert.equal(adminResponse.status, 200);
     const adminResult = await adminResponse.json() as { token: string; user: { id: string; passwordHash?: string } };
+    const tokenPayload = JSON.parse(Buffer.from(adminResult.token.split('.')[1]!, 'base64url').toString('utf8')) as { exp: number };
+    assert.ok(tokenPayload.exp > Math.floor(Date.now() / 1000));
+    assert.ok(tokenPayload.exp <= Math.floor(Date.now() / 1000) + 60 * 60 + 1, 'session token lifetime is at most one hour');
     assert.equal(adminResult.user.id, admin.id);
     assert.equal(adminResult.user.passwordHash, undefined);
     const adminHeaders = { authorization: `Bearer ${adminResult.token}` };

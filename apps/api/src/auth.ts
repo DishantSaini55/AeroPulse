@@ -41,7 +41,7 @@ export class AuthService implements AuthProvider {
       .setIssuedAt()
       .setIssuer('aeropulse')
       .setAudience('aeropulse-web')
-      .setExpirationTime('8h')
+      .setExpirationTime('1h')
       .sign(this.key);
     return { token, user: this.publicUser(user) };
   }

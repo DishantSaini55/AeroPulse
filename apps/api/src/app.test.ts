@@ -33,8 +33,17 @@ test('health endpoint returns service status', async () => {
   assert.deepEqual(await response.json(), { status: 'ok', service: 'aeropulse-api', instanceId: 'local' });
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.equal(response.headers.get('x-dns-prefetch-control'), 'off');
+  assert.equal(response.headers.get('x-permitted-cross-domain-policies'), 'none');
   assert.match(response.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+  assert.equal(response.headers.get('access-control-allow-origin'), null);
   assert.ok(response.headers.get('x-request-id'));
+});
+
+test('unknown forwarded headers are not trusted by default and login token responses are not cached', async () => {
+  const response = await fetch(`${baseUrl}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9' }, body: JSON.stringify({ email: 'bad@example.test', password: 'not-a-valid-password' }) });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('cache-control'), null);
 });
 
 test('create and retrieve a simulated note', async () => {

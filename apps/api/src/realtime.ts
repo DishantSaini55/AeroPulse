@@ -24,6 +24,7 @@ interface ServerToClientEvents {
 export function attachRealtime(server: HttpServer, auth?: AuthProvider) {
   const io = new Server<Record<string, never>, ServerToClientEvents>(server, {
     path: '/socket.io',
+    cors: { origin: false },
   });
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;

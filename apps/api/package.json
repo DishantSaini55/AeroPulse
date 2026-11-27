@@ -33,7 +33,7 @@
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "@types/pdfkit": "0.17.7",
     "pdfjs-dist": "6.5.438",
     "prisma": "^7.0.0",

@@ -469,6 +469,7 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
     response.json({
       recordedAt: new Date().toISOString(),
       simulated: true,
+      heartbeatPolicy,
       data: devices,
     });
   });

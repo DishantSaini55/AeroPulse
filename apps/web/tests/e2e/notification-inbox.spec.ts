@@ -77,10 +77,12 @@ test('inbox reads are scoped, mark-read works, and preferences persist', async (
     else if (path === '/api/v1/notification-preferences') { if (method === 'PATCH') enabled = (route.request().postDataJSON() as { inAppEnabled?: boolean }).inAppEnabled ?? enabled; body = { data: { inAppEnabled: enabled, minimumPriority: 'INFORMATION' } }; }
     else if (path === '/api/v1/alarms') body = { data: [] };
     else if (path === '/api/v1/maintenance/announcements') body = { data: [] };
-    else if (path === '/api/v1/monitoring/snapshot') body = { data: [], recordedAt: new Date().toISOString(), simulated: true };
+    else if (path === '/api/v1/monitoring/snapshot') body = { data: [], recordedAt: new Date().toISOString(), simulated: true, heartbeatPolicy: { expectedIntervalMs: 5000, missedHeartbeatLimit: 2, timeoutMs: 10000 } };
     else if (path === '/api/v1/weather/vidp') body = { data: null, stale: true, source: 'AVIATION_WEATHER_CENTER' };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('received within 10 seconds')).toBeVisible();
   await page.goto('/notifications', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Notification inbox' })).toBeVisible();
   await expect(page.getByText('Incident assigned')).toBeVisible();

@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: aeropulse
       POSTGRES_USER: aeropulse
-      POSTGRES_PASSWORD: aeropulse
+      POSTGRES_PASSWORD: ${AEROPULSE_DB_PASSWORD:?Set AEROPULSE_DB_PASSWORD (URL-safe, at least 32 characters)}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -17,27 +17,42 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${AEROPULSE_REDIS_PASSWORD:?Set AEROPULSE_REDIS_PASSWORD (URL-safe, at least 32 characters)}"]
     volumes:
       - redis-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$AEROPULSE_REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
       start_period: 5s
+    environment:
+      AEROPULSE_REDIS_PASSWORD: ${AEROPULSE_REDIS_PASSWORD:?Set AEROPULSE_REDIS_PASSWORD (URL-safe, at least 32 characters)}
 
   migrate:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed"]
+    command: ["npx", "prisma", "migrate", "deploy"]
     environment:
-      DATABASE_URL: postgresql://aeropulse:aeropulse@postgres:5432/aeropulse?schema=public
+      DATABASE_URL: postgresql://aeropulse:${AEROPULSE_DB_PASSWORD:?Set AEROPULSE_DB_PASSWORD}@postgres:5432/aeropulse?schema=public
     depends_on:
       postgres:
         condition: service_healthy
+    restart: "no"
+
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["npx", "prisma", "db", "seed"]
+    environment:
+      DATABASE_URL: postgresql://aeropulse:${AEROPULSE_DB_PASSWORD:?Set AEROPULSE_DB_PASSWORD}@postgres:5432/aeropulse?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["demo-seed"]
     restart: "no"
 
   api-a:
@@ -45,13 +60,14 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment: &api-environment
-      DATABASE_URL: postgresql://aeropulse:aeropulse@postgres:5432/aeropulse?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://aeropulse:${AEROPULSE_DB_PASSWORD:?Set AEROPULSE_DB_PASSWORD}@postgres:5432/aeropulse?schema=public
+      REDIS_URL: redis://:${AEROPULSE_REDIS_PASSWORD:?Set AEROPULSE_REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${AEROPULSE_JWT_SECRET:?Set AEROPULSE_JWT_SECRET in your shell or .env file}
       INSTANCE_ID: api-a
       PORT: 4000
       NODE_ENV: production
       LOG_FORMAT: json
+      DISABLE_BACKGROUND_JOBS: ${AEROPULSE_DISABLE_BACKGROUND_JOBS:-0}
       TELEMETRY_RETENTION_DAYS: 90
     depends_on:
       migrate:
@@ -93,7 +109,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${AEROPULSE_WEB_PORT:-8080}:8080"
     depends_on:
       api-a:
         condition: service_healthy

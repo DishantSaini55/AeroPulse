@@ -78,7 +78,8 @@ test('invalid input, unknown note and malformed JSON return JSON errors', async 
 test('database asset registry returns ten systems and twenty devices', { skip: !process.env.DATABASE_URL }, async () => {
   const db = createDb();
   await db.$connect();
-  const assetServer = createApp(db, undefined, auth).listen(0);
+  const configuredHeartbeatPolicy = { expectedIntervalMs: 5000, missedHeartbeatLimit: 2, timeoutMs: 10000 };
+  const assetServer = createApp(db, undefined, auth, undefined, configuredHeartbeatPolicy).listen(0);
   try {
     await new Promise<void>((resolve) => assetServer.once('listening', resolve));
     const address = assetServer.address();
@@ -95,8 +96,9 @@ test('database asset registry returns ten systems and twenty devices', { skip: !
     assert.equal((await fetch(`${url}/api/v1/systems/UNKNOWN`, { headers })).status, 404);
     const snapshot = await fetch(`${url}/api/v1/monitoring/snapshot`, { headers });
     assert.equal(snapshot.status, 200);
-    const monitoring = await snapshot.json() as { data: Array<{ latestTelemetry: unknown; latestHeartbeatAt: string | null }> };
+    const monitoring = await snapshot.json() as { heartbeatPolicy: typeof configuredHeartbeatPolicy; data: Array<{ latestTelemetry: unknown; latestHeartbeatAt: string | null }> };
     assert.equal(monitoring.data.length, 20);
+    assert.deepEqual(monitoring.heartbeatPolicy, configuredHeartbeatPolicy);
   } finally {
     await new Promise<void>((resolve, reject) => assetServer.close((error) => error ? reject(error) : resolve()));
     await db.$disconnect();

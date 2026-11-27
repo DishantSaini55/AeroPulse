@@ -31,7 +31,7 @@ export type Device = {
   latestHeartbeatAt: string | null;
 };
 
-export type Snapshot = { recordedAt: string; simulated: true; data: Device[] };
+export type Snapshot = { recordedAt: string; simulated: true; heartbeatPolicy: { expectedIntervalMs: number; missedHeartbeatLimit: number; timeoutMs: number }; data: Device[] };
 export type TelemetryHistory = {
   deviceCode: string;
   data: Telemetry[];

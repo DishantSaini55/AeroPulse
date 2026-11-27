@@ -58,7 +58,11 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
   const maintenanceRedundancy = redundancy ?? (db ? new RedundancyManager(db, heartbeatPolicy) : undefined);
 
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  // Trust only an explicitly configured proxy hop count. Never accept arbitrary
+  // client-supplied X-Forwarded-For values in a direct/local deployment.
+  const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0 || trustedProxyHops > 3) throw new Error('TRUST_PROXY_HOPS must be an integer from 0 to 3');
+  if (trustedProxyHops > 0) app.set('trust proxy', trustedProxyHops);
   app.use(securityHeaders());
   app.use(requestLogger());
   app.use(express.json({ limit: '16kb' }));
@@ -439,22 +443,33 @@ export function createApp(db?: Database, weather?: WeatherService, auth?: AuthPr
       response.status(503).json({ error: { code: 'DATABASE_UNAVAILABLE', message: 'Database not configured' } });
       return;
     }
-    const devices = await db.device.findMany({
-      orderBy: [{ system: { code: 'asc' } }, { role: 'asc' }],
-      include: {
-        system: { select: { code: true, name: true, availability: true } },
-        telemetry: { take: 1, orderBy: { recordedAt: 'desc' } },
-        heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } },
-      },
-    });
+    const devices = await db.$queryRaw<Array<{
+      id: string; code: string; name: string; role: string; health: string; activationState: string;
+      maintenanceStatus: string; maintenanceEligible: boolean; system: { code: string; name: string; availability: string };
+      latestTelemetry: Record<string, unknown> | null; latestHeartbeatAt: Date | null;
+    }>>`
+      SELECT d."id", d."code", d."name", d."role"::text AS "role", d."health"::text AS "health",
+        d."activationState"::text AS "activationState", d."maintenanceStatus"::text AS "maintenanceStatus",
+        d."maintenanceEligible", jsonb_build_object('code', s."code", 'name', s."name", 'availability', s."availability"::text) AS "system",
+        CASE WHEN t."id" IS NULL THEN NULL ELSE jsonb_build_object(
+          'id', t."id", 'recordedAt', t."recordedAt", 'temperatureC', t."temperatureC", 'cpuPercent', t."cpuPercent",
+          'memoryPercent', t."memoryPercent", 'diskPercent', t."diskPercent", 'latencyMs', t."latencyMs",
+          'packetLossPct', t."packetLossPct", 'voltageV', t."voltageV", 'currentA', t."currentA", 'fanRpm', t."fanRpm",
+          'batteryPct', t."batteryPct", 'signalPct', t."signalPct", 'simulated', t."simulated") END AS "latestTelemetry",
+        h."recordedAt" AS "latestHeartbeatAt"
+      FROM "Device" d
+      JOIN "LogicalSystem" s ON s."id" = d."systemId"
+      LEFT JOIN LATERAL (SELECT tr."id", tr."recordedAt", tr."temperatureC", tr."cpuPercent", tr."memoryPercent",
+        tr."diskPercent", tr."latencyMs", tr."packetLossPct", tr."voltageV", tr."currentA", tr."fanRpm",
+        tr."batteryPct", tr."signalPct", tr."simulated" FROM "TelemetryReading" tr WHERE tr."deviceId" = d."id"
+        ORDER BY tr."recordedAt" DESC LIMIT 1) t ON TRUE
+      LEFT JOIN LATERAL (SELECT hb."recordedAt" FROM "Heartbeat" hb WHERE hb."deviceId" = d."id"
+        ORDER BY hb."recordedAt" DESC LIMIT 1) h ON TRUE
+      ORDER BY s."code" ASC, d."role" ASC`;
     response.json({
       recordedAt: new Date().toISOString(),
       simulated: true,
-      data: devices.map(({ telemetry, heartbeats, ...device }) => ({
-        ...device,
-        latestTelemetry: telemetry[0] ?? null,
-        latestHeartbeatAt: heartbeats[0]?.recordedAt ?? null,
-      })),
+      data: devices,
     });
   });
 

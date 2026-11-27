@@ -73,6 +73,10 @@ await cluster?.onControl(control => simulator.applyControl(control));
 
 async function startLeaderJobs() {
   if (jobsRunning) return;
+  if (process.env.DISABLE_BACKGROUND_JOBS === '1') {
+    console.log('AeroPulse background jobs disabled by local verification configuration');
+    return;
+  }
   jobsRunning = true;
   console.log(`AeroPulse instance ${process.env.INSTANCE_ID ?? 'local'} became background-job leader`);
   void incidents.sync().catch(error => console.error('Initial incident scan failed', error));

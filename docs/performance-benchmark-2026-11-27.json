@@ -1,0 +1,392 @@
+{
+  "generatedAt": "2026-11-27T14:20:37.445Z",
+  "target": "loopback only; isolated aeropulse_test PostgreSQL; background jobs disabled",
+  "configuration": {
+    "requestsPerApiPath": 120,
+    "concurrency": 6,
+    "socketSamples": 60,
+    "pdfSamples": 5
+  },
+  "api": {
+    "notificationInbox": {
+      "requests": 120,
+      "elapsedMs": 3834.5,
+      "requestsPerSecond": 31.29,
+      "p50Ms": 152.91,
+      "p95Ms": 267.86,
+      "p99Ms": 783.02,
+      "errorRatePct": 0,
+      "statuses": {
+        "200": 120
+      },
+      "totalResponseBytes": 1521240,
+      "averageResponseBytes": 12677
+    },
+    "monitoringSnapshot": {
+      "requests": 120,
+      "elapsedMs": 1405.04,
+      "requestsPerSecond": 85.41,
+      "p50Ms": 63.23,
+      "p95Ms": 106.37,
+      "p99Ms": 138.68,
+      "errorRatePct": 0,
+      "statuses": {
+        "200": 120
+      },
+      "totalResponseBytes": 1599480,
+      "averageResponseBytes": 13329
+    },
+    "alarms": {
+      "requests": 120,
+      "elapsedMs": 2515.98,
+      "requestsPerSecond": 47.7,
+      "p50Ms": 121.48,
+      "p95Ms": 164.33,
+      "p99Ms": 178.92,
+      "errorRatePct": 0,
+      "statuses": {
+        "200": 120
+      },
+      "totalResponseBytes": 6600,
+      "averageResponseBytes": 55
+    }
+  },
+  "socketPropagation": {
+    "requests": 60,
+    "elapsedMs": 61.72,
+    "requestsPerSecond": 972.12,
+    "p50Ms": 0.62,
+    "p95Ms": 2.42,
+    "p99Ms": 7.61,
+    "errorRatePct": 0,
+    "statuses": {
+      "200": 60
+    }
+  },
+  "reportPdf": {
+    "requests": 5,
+    "elapsedMs": 3971.78,
+    "requestsPerSecond": 1.26,
+    "p50Ms": 644.25,
+    "p95Ms": 1308.4,
+    "p99Ms": 1308.4,
+    "errorRatePct": 0,
+    "statuses": {
+      "200": 5
+    },
+    "pdfBytes": [
+      20727,
+      20741,
+      20603,
+      20731,
+      20709
+    ]
+  },
+  "notificationDispatch": {
+    "requests": 3,
+    "elapsedMs": 2739.46,
+    "requestsPerSecond": 1.1,
+    "p50Ms": 927.27,
+    "p95Ms": 946.22,
+    "p99Ms": 946.22,
+    "errorRatePct": 0,
+    "statuses": {
+      "200": 3
+    },
+    "deliveriesDispatchedInRolledBackTransactions": [
+      100,
+      100,
+      100
+    ],
+    "averageDeliveriesPerSecond": 109.51,
+    "persistentWrites": 0
+  },
+  "notificationRecipientQueryPlan": [
+    {
+      "QUERY PLAN": [
+        {
+          "Plan": {
+            "Node Type": "Limit",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 88.12,
+            "Total Cost": 88.17,
+            "Plan Rows": 20,
+            "Plan Width": 48,
+            "Actual Startup Time": 0.331,
+            "Actual Total Time": 0.34,
+            "Actual Rows": 20,
+            "Actual Loops": 1,
+            "Shared Hit Blocks": 49,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0,
+            "Plans": [
+              {
+                "Node Type": "Sort",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 88.12,
+                "Total Cost": 88.21,
+                "Plan Rows": 37,
+                "Plan Width": 48,
+                "Actual Startup Time": 0.329,
+                "Actual Total Time": 0.333,
+                "Actual Rows": 20,
+                "Actual Loops": 1,
+                "Sort Key": [
+                  "\"createdAt\" DESC"
+                ],
+                "Sort Method": "top-N heapsort",
+                "Sort Space Used": 27,
+                "Sort Space Type": "Memory",
+                "Shared Hit Blocks": 49,
+                "Shared Read Blocks": 0,
+                "Shared Dirtied Blocks": 0,
+                "Shared Written Blocks": 0,
+                "Local Hit Blocks": 0,
+                "Local Read Blocks": 0,
+                "Local Dirtied Blocks": 0,
+                "Local Written Blocks": 0,
+                "Temp Read Blocks": 0,
+                "Temp Written Blocks": 0,
+                "Plans": [
+                  {
+                    "Node Type": "Bitmap Heap Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "NotificationRecipient",
+                    "Alias": "NotificationRecipient",
+                    "Startup Cost": 4.57,
+                    "Total Cost": 87.15,
+                    "Plan Rows": 37,
+                    "Plan Width": 48,
+                    "Actual Startup Time": 0.089,
+                    "Actual Total Time": 0.266,
+                    "Actual Rows": 48,
+                    "Actual Loops": 1,
+                    "Recheck Cond": "(\"userId\" = '[local benchmark user]'::uuid)",
+                    "Rows Removed by Index Recheck": 0,
+                    "Exact Heap Blocks": 47,
+                    "Lossy Heap Blocks": 0,
+                    "Shared Hit Blocks": 49,
+                    "Shared Read Blocks": 0,
+                    "Shared Dirtied Blocks": 0,
+                    "Shared Written Blocks": 0,
+                    "Local Hit Blocks": 0,
+                    "Local Read Blocks": 0,
+                    "Local Dirtied Blocks": 0,
+                    "Local Written Blocks": 0,
+                    "Temp Read Blocks": 0,
+                    "Temp Written Blocks": 0,
+                    "Plans": [
+                      {
+                        "Node Type": "Bitmap Index Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Index Name": "NotificationRecipient_userId_readAt_createdAt_idx",
+                        "Startup Cost": 0,
+                        "Total Cost": 4.56,
+                        "Plan Rows": 37,
+                        "Plan Width": 0,
+                        "Actual Startup Time": 0.063,
+                        "Actual Total Time": 0.064,
+                        "Actual Rows": 51,
+                        "Actual Loops": 1,
+                        "Index Cond": "(\"userId\" = '[local benchmark user]'::uuid)",
+                        "Shared Hit Blocks": 2,
+                        "Shared Read Blocks": 0,
+                        "Shared Dirtied Blocks": 0,
+                        "Shared Written Blocks": 0,
+                        "Local Hit Blocks": 0,
+                        "Local Read Blocks": 0,
+                        "Local Dirtied Blocks": 0,
+                        "Local Written Blocks": 0,
+                        "Temp Read Blocks": 0,
+                        "Temp Written Blocks": 0
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "Planning": {
+            "Shared Hit Blocks": 9,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          },
+          "Planning Time": 0.475,
+          "Triggers": [],
+          "Execution Time": 0.528
+        }
+      ]
+    }
+  ],
+  "apiProcessUsage": {
+    "samples": 9,
+    "cpuSeconds": 12.25,
+    "peakRssBytes": 201650176,
+    "endingRssBytes": 157294592
+  },
+  "frontendBundle": {
+    "files": [
+      {
+        "name": "index-CAtw6PRJ.css",
+        "bytes": 44090,
+        "gzipBytes": 9248
+      },
+      {
+        "name": "index-Yf3mZw5t.js",
+        "bytes": 486794,
+        "gzipBytes": 143574
+      },
+      {
+        "name": "LineChart-B99bDt50.js",
+        "bytes": 430190,
+        "gzipBytes": 123193
+      },
+      {
+        "name": "MaintenancePages-6BBVER6D.css",
+        "bytes": 3748,
+        "gzipBytes": 1051
+      },
+      {
+        "name": "MaintenancePages-CqZDLFKT.js",
+        "bytes": 33206,
+        "gzipBytes": 8591
+      },
+      {
+        "name": "ReliabilityCharts-5Bujpc9W.js",
+        "bytes": 46370,
+        "gzipBytes": 14237
+      },
+      {
+        "name": "TelemetryChart-kbCa-ink.js",
+        "bytes": 828,
+        "gzipBytes": 494
+      }
+    ],
+    "totalBytes": 1045226,
+    "totalGzipBytes": 300388
+  },
+  "previousRunReference": {
+    "generatedAt": "2026-11-27T14:04:41.030Z",
+    "api": {
+      "notificationInbox": {
+        "requests": 120,
+        "elapsedMs": 3676.22,
+        "requestsPerSecond": 32.64,
+        "p50Ms": 144.61,
+        "p95Ms": 288.94,
+        "p99Ms": 858.26,
+        "errorRatePct": 0,
+        "statuses": {
+          "200": 120
+        },
+        "totalResponseBytes": 1514760,
+        "averageResponseBytes": 12623
+      },
+      "monitoringSnapshot": {
+        "requests": 120,
+        "elapsedMs": 1357.01,
+        "requestsPerSecond": 88.43,
+        "p50Ms": 64.32,
+        "p95Ms": 86.95,
+        "p99Ms": 111.65,
+        "errorRatePct": 0,
+        "statuses": {
+          "200": 120
+        },
+        "totalResponseBytes": 1590600,
+        "averageResponseBytes": 13255
+      },
+      "alarms": {
+        "requests": 120,
+        "elapsedMs": 2563.06,
+        "requestsPerSecond": 46.82,
+        "p50Ms": 123.57,
+        "p95Ms": 151.79,
+        "p99Ms": 165.3,
+        "errorRatePct": 0,
+        "statuses": {
+          "200": 120
+        },
+        "totalResponseBytes": 6600,
+        "averageResponseBytes": 55
+      }
+    },
+    "comparisonWithPreviousRun": {
+      "sameConfiguration": true,
+      "api": {
+        "notificationInbox": {
+          "p50ChangePct": -5.08,
+          "p95ChangePct": 5.08,
+          "p99ChangePct": 4.71,
+          "throughputChangePct": 2.26,
+          "responseBytesChangePct": 0
+        },
+        "monitoringSnapshot": {
+          "p50ChangePct": -1.8,
+          "p95ChangePct": -7.32,
+          "p99ChangePct": -4.11,
+          "throughputChangePct": 2.05,
+          "responseBytesChangePct": 0
+        },
+        "alarms": {
+          "p50ChangePct": -0.31,
+          "p95ChangePct": -3.15,
+          "p99ChangePct": 3.38,
+          "throughputChangePct": -1.2,
+          "responseBytesChangePct": 0
+        }
+      },
+      "frontendBundleBytesChangePct": 0,
+      "frontendBundleGzipBytesChangePct": 0
+    }
+  },
+  "comparisonWithPreviousRun": {
+    "sameConfiguration": true,
+    "api": {
+      "notificationInbox": {
+        "p50ChangePct": 5.74,
+        "p95ChangePct": -7.3,
+        "p99ChangePct": -8.77,
+        "throughputChangePct": -4.14,
+        "responseBytesChangePct": 0.43
+      },
+      "monitoringSnapshot": {
+        "p50ChangePct": -1.69,
+        "p95ChangePct": 22.33,
+        "p99ChangePct": 24.21,
+        "throughputChangePct": -3.42,
+        "responseBytesChangePct": 0.56
+      },
+      "alarms": {
+        "p50ChangePct": -1.69,
+        "p95ChangePct": 8.26,
+        "p99ChangePct": 8.24,
+        "throughputChangePct": 1.88,
+        "responseBytesChangePct": 0
+      }
+    },
+    "frontendBundleBytesChangePct": 0,
+    "frontendBundleGzipBytesChangePct": 0
+  }
+}

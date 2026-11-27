@@ -14,7 +14,8 @@
     "verify:notifications:redis": "node scripts/verify-notification-redis.mjs",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
-    "auth:bootstrap": "tsx prisma/bootstrap-admin.ts"
+    "auth:bootstrap": "tsx prisma/bootstrap-admin.ts",
+    "benchmark:runtime": "node scripts/benchmark-runtime.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",

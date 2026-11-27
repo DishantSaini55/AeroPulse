@@ -94,5 +94,7 @@ jobs:
           retention-days: 7
       - name: Validate Docker Compose
         env:
+          AEROPULSE_DB_PASSWORD: ci-only-compose-db-password-not-used-to-start-services
+          AEROPULSE_REDIS_PASSWORD: ci-only-compose-redis-password-not-used-to-start-services
           AEROPULSE_JWT_SECRET: ci-only-secret-that-is-more-than-thirty-two-bytes-long
         run: docker compose config --quiet

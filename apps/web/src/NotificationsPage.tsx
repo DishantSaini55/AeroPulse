@@ -4,18 +4,26 @@ import { Bell, CheckCheck } from 'lucide-react';
 import { getNotificationPreferences, getNotifications, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences } from './api';
 import { formatUtcDateTime } from './time';
 
+const notificationPreferencesKey = ['notification-preferences'] as const;
+
 export function NotificationsPage() {
   const client = useQueryClient(); const [onlyUnread, setOnlyUnread] = useState(false); const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const notices = useQuery({ queryKey: ['notifications', onlyUnread], queryFn: () => getNotifications(onlyUnread ? true : undefined), refetchInterval: 15000 });
-  const preferences = useQuery({ queryKey: ['notification-preferences'], queryFn: getNotificationPreferences });
+  const preferences = useQuery({ queryKey: notificationPreferencesKey, queryFn: getNotificationPreferences });
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['notifications'] }); };
   const markAll = async () => { setBusy(true); setMessage(''); try { await markAllNotificationsRead(); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to update notifications'); } finally { setBusy(false); } };
   const update = async (input: Parameters<typeof updateNotificationPreferences>[0]) => {
-    const previous = client.getQueryData<{ data: Awaited<ReturnType<typeof updateNotificationPreferences>> }>(['notification-preferences']);
-    if (previous) client.setQueryData(['notification-preferences'], { data: { ...previous.data, ...input } });
-    try { const saved = await updateNotificationPreferences(input); client.setQueryData(['notification-preferences'], { data: saved }); }
-    catch (error) { if (previous) client.setQueryData(['notification-preferences'], previous); setMessage(error instanceof Error ? error.message : 'Unable to save preferences'); }
+    await client.cancelQueries({ queryKey: notificationPreferencesKey });
+    const previous = client.getQueryData<{ data: Awaited<ReturnType<typeof updateNotificationPreferences>> }>(notificationPreferencesKey);
+    const current = previous?.data ?? { inAppEnabled: true, minimumPriority: 'INFORMATION' as const };
+    client.setQueryData(notificationPreferencesKey, { data: { ...current, ...input } });
+    try { const saved = await updateNotificationPreferences(input); client.setQueryData(notificationPreferencesKey, { data: saved }); }
+    catch (error) {
+      if (previous) client.setQueryData(notificationPreferencesKey, previous);
+      else await client.invalidateQueries({ queryKey: notificationPreferencesKey });
+      setMessage(error instanceof Error ? error.message : 'Unable to save preferences');
+    }
   };
   const markOne = async (id: string) => { setMessage(''); try { await markNotificationRead(id); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to mark notification read'); } };
   return <><div className="page-heading"><span className="eyebrow">OPERATIONS / NOTIFICATIONS</span><h1>Notification inbox</h1><p>Durable in-app delivery and read state. Reading an item never acknowledges or resolves its alarm.</p></div>

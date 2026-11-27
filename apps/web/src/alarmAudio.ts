@@ -17,6 +17,7 @@ export type AnnouncementAlarm = {
   message: string;
   resolvedAt: string | null;
   acknowledged: boolean;
+  operationalNotice?: true;
   device: { code: string; name: string; role?: string; system: { code: string; name: string; availability?: string } };
   diagnosis?: { suspectedCause?: string; confirmedRootCause?: string | null; component?: string; symptoms?: string[]; serviceImpact?: string; investigationSteps?: string[]; recoveryAction?: string } | null;
   failover?: { result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; toDevice?: { code: string; name?: string } | null } | null;
@@ -45,6 +46,7 @@ const priority: Record<AlarmLevel, number> = { INFORMATION: 1, WARNING: 2, MAJOR
 export const alarmPriority = (level: AlarmLevel) => priority[level];
 
 export function buildVoiceAnnouncement(alarm: AnnouncementAlarm): string {
+  if (alarm.operationalNotice) return `Simulation notice. ${alarm.message}`;
   const device = `${alarm.device.system.name} ${alarm.device.role?.toLowerCase() ?? ''} ${alarm.device.name}`.replace(/\s+/g, ' ').trim();
   const simulated = 'Simulation alert.';
   if (alarm.resolvedAt) return `${simulated} ${device} has recovered. ${alarm.diagnosis?.recoveryAction ?? 'Verify equipment stability before changing service assignment.'}`;
@@ -72,10 +74,21 @@ export class AlarmAudioManager {
   private queue: AnnouncementAlarm[] = [];
   private seen = new Set<string>();
   private repeat: ReturnType<typeof setInterval> | null = null;
-  private channel: BroadcastChannel | null = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('aeropulse-alarm-audio');
+  private speaking: SpeechSynthesisUtterance | null = null;
+  private speakingLevel: AlarmLevel | null = null;
+  private repeatLevel: AlarmLevel | null = null;
+  private channel: BroadcastChannel | null;
 
-  constructor(private preferences: () => AudioPreferences) {
-    this.channel?.addEventListener('message', event => { if (typeof event.data?.id === 'string') this.seen.add(event.data.id); });
+  constructor(private preferences: () => AudioPreferences, private readonly scope = 'local') {
+    this.channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('aeropulse-alarm-audio:' + scope);
+    try { this.seen = new Set(JSON.parse(sessionStorage.getItem('ap-audio-seen:' + scope) ?? '[]') as string[]); } catch { /* Browser storage can be unavailable. */ }
+    this.channel?.addEventListener('message', event => { if (typeof event.data?.id === 'string') this.remember(event.data.id); });
+  }
+
+  private remember(key: string) {
+    this.seen.add(key);
+    if (this.seen.size > 1000) this.seen.delete(this.seen.values().next().value!);
+    try { sessionStorage.setItem('ap-audio-seen:' + this.scope, JSON.stringify([...this.seen])); } catch { /* Local deduplication still works. */ }
   }
 
   get ready() { return this.context?.state === 'running'; }
@@ -85,6 +98,7 @@ export class AlarmAudioManager {
   async activate() {
     this.context ??= new AudioContext();
     await this.context.resume();
+    this.playNext();
   }
 
   setPreferencesChanged() { if (this.output) this.output.gain.value = this.preferences().masterVolume; }
@@ -93,24 +107,31 @@ export class AlarmAudioManager {
     const prefs = this.preferences();
     const key = `${alarm.id}:${alarm.level}:${alarm.resolvedAt ?? 'active'}`;
     if (this.seen.has(key) || !prefs.severities[alarm.level]) return;
-    this.seen.add(key); this.channel?.postMessage({ id: key });
+    this.remember(key); this.channel?.postMessage({ id: key });
+    if (prefs.muted) return;
     this.queue.push(alarm); this.queue.sort((a, b) => alarmPriority(b.level) - alarmPriority(a.level));
-    if (alarm.level === 'CRITICAL' && this.voiceSupported) speechSynthesis.cancel();
+    if (this.queue.length > 50) this.queue.pop();
+    if (alarm.level === 'CRITICAL' && this.speaking && this.speakingLevel !== 'CRITICAL' && this.voiceSupported) {
+      this.speaking = null; this.speakingLevel = null; speechSynthesis.cancel();
+    }
     this.playNext();
   }
 
   private playNext() {
+    if (!this.ready || this.speaking) return;
     const alarm = this.queue.shift();
     if (!alarm) return;
     const prefs = this.preferences();
     if (prefs.muted) return;
-    if (prefs.soundEnabled && this.ready) this.playPattern(alarm.level);
+    if (prefs.soundEnabled && (!this.repeatLevel || alarmPriority(alarm.level) >= alarmPriority(this.repeatLevel))) this.playPattern(alarm.level);
     if (prefs.voiceEnabled && this.voiceSupported) {
       const utterance = new SpeechSynthesisUtterance(buildVoiceAnnouncement(alarm));
       utterance.volume = prefs.voiceVolume; utterance.rate = prefs.speechRate;
       const voice = this.voices().find(item => item.name === prefs.voiceName) ?? this.voices().find(item => /^en/i.test(item.lang) && /female|zira|samantha|aria/i.test(item.name)) ?? this.voices().find(item => /^en/i.test(item.lang));
       if (voice) utterance.voice = voice;
-      utterance.onend = () => this.playNext(); utterance.onerror = () => this.playNext();
+      this.speaking = utterance; this.speakingLevel = alarm.level;
+      const done = () => { if (this.speaking !== utterance) return; this.speaking = null; this.speakingLevel = null; this.playNext(); };
+      utterance.onend = done; utterance.onerror = done;
       speechSynthesis.speak(utterance);
     } else this.playNext();
   }
@@ -128,10 +149,13 @@ export class AlarmAudioManager {
       if (level === 'CRITICAL') { tone(this.context, this.output, 780, start, 0.18, 0.2); tone(this.context, this.output, 780, start + 0.28, 0.18, 0.2); tone(this.context, this.output, 780, start + 0.56, 0.18, 0.2); }
     };
     play();
-    if (level === 'MAJOR' || level === 'CRITICAL') this.repeat = setInterval(play, level === 'CRITICAL' ? 8000 : 15000);
+    if (level === 'MAJOR' || level === 'CRITICAL') { this.repeatLevel = level; this.repeat = setInterval(play, level === 'CRITICAL' ? 8000 : 15000); }
   }
 
-  stopTone() { if (this.repeat) clearInterval(this.repeat); this.repeat = null; this.output?.disconnect(); this.output = null; }
-  stopAll() { this.queue = []; this.stopTone(); if (this.voiceSupported) speechSynthesis.cancel(); }
+  reconcileActiveAlarms(alarms: Pick<AnnouncementAlarm, 'level' | 'acknowledged' | 'resolvedAt'>[]) {
+    if (this.repeatLevel && !alarms.some(alarm => alarm.level === this.repeatLevel && !alarm.resolvedAt && !alarm.acknowledged)) this.stopTone();
+  }
+  stopTone() { if (this.repeat) clearInterval(this.repeat); this.repeat = null; this.repeatLevel = null; this.output?.disconnect(); this.output = null; }
+  stopAll() { this.queue = []; this.speaking = null; this.speakingLevel = null; this.stopTone(); if (this.voiceSupported) speechSynthesis.cancel(); }
   destroy() { this.stopAll(); this.channel?.close(); void this.context?.close(); this.context = null; }
 }

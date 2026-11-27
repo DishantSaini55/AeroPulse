@@ -6,6 +6,8 @@ node_modules/
 # Build output and test coverage
 dist/
 coverage/
+test-results/
+playwright-report/
 .vite/
 *.tsbuildinfo
 

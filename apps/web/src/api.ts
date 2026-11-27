@@ -24,6 +24,8 @@ export type Device = {
   role: 'PRIMARY' | 'SECONDARY';
   health: string;
   activationState: string;
+  maintenanceStatus: string;
+  maintenanceEligible: boolean;
   system: { code: string; name: string; availability: string };
   latestTelemetry: Telemetry | null;
   latestHeartbeatAt: string | null;
@@ -60,7 +62,7 @@ export type Weather = {
   };
 };
 
-async function getJson<T>(path: string, allowUnavailable = false, timeoutMs = 10000): Promise<T> {
+export async function getJson<T>(path: string, allowUnavailable = false, timeoutMs = 10000): Promise<T> {
   const token = getToken();
   const response = await fetch(path, { signal: AbortSignal.timeout(timeoutMs), headers: token ? { authorization: `Bearer ${token}` } : {} });
   const result = await response.json();
@@ -81,12 +83,12 @@ export type Redundancy = {
   data: {
     id: string; code: string; name: string; availability: 'AVAILABLE' | 'DEGRADED' | 'OUTAGE';
     activeDeviceCode: string | null; standbyReady: boolean;
-    lastFailover: { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; detectedAt: string; durationMs: number; reason: string } | null;
-    devices: { id: string; code: string; name: string; role: 'PRIMARY' | 'SECONDARY'; health: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RECOVERING'; activationState: 'ACTIVE' | 'STANDBY' | 'INELIGIBLE'; latestHeartbeatAt: string | null; heartbeatPaused: boolean }[];
+    lastFailover: { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK' | 'PLANNED_MAINTENANCE'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; detectedAt: string; durationMs: number; reason: string } | null;
+    devices: { id: string; code: string; name: string; role: 'PRIMARY' | 'SECONDARY'; health: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RECOVERING'; activationState: 'ACTIVE' | 'STANDBY' | 'INELIGIBLE'; maintenanceStatus: string; maintenanceEligible: boolean; latestHeartbeatAt: string | null; heartbeatPaused: boolean }[];
   }[];
 };
 export const getRedundancy = () => getJson<Redundancy>('/api/v1/redundancy');
-export type FailoverEvent = { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; reason: string; detectedAt: string; completedAt: string; durationMs: number; system: { code: string; name: string }; fromDevice: { code: string } | null; toDevice: { code: string } | null; initiatedBy: { name: string } | null };
+export type FailoverEvent = { id: string; action: 'AUTOMATIC_FAILOVER' | 'MANUAL_FAILBACK' | 'PLANNED_MAINTENANCE'; result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; reason: string; detectedAt: string; completedAt: string; durationMs: number; system: { code: string; name: string }; fromDevice: { code: string } | null; toDevice: { code: string } | null; initiatedBy: { name: string } | null };
 export const getFailoverEvents = async () => (await getJson<{ data: FailoverEvent[] }>('/api/v1/failover-events?limit=30')).data;
 
 async function postAction(path: string, body: unknown) {
@@ -115,6 +117,14 @@ export async function confirmDiagnosis(id: string, rootCause: string) {
 export type Alarm = { id: string; sourceKey: string; level: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; initialLevel: string; message: string; createdAt: string; resolvedAt: string | null; acknowledged: boolean; acknowledgedByMe: boolean; acknowledgedAt: string | null; acknowledgedBy: string | null; device: { code: string; name: string; role: string; system: { code: string; name: string; availability: string; failover: { result: 'SUCCESS' | 'NO_HEALTHY_STANDBY' | 'BLOCKED'; toDevice: { code: string; name: string } | null } | null } }; diagnosis: { suspectedCause: string; confirmedRootCause: string | null; component: string; symptoms: string[]; supportingTelemetry: Record<string, number>; serviceImpact: string; investigationSteps: string[]; recoveryAction: string } | null };
 export const getAlarms = async (active: 'true' | 'false' | 'all' = 'true') => (await getJson<{ data: Alarm[] }>(`/api/v1/alarms?limit=100${active === 'all' ? '' : `&active=${active}`}`)).data;
 export const acknowledgeAlarm = (id: string) => postAction(`/api/v1/alarms/${encodeURIComponent(id)}/acknowledge`, {});
+
+export type Notification = { id: string; readAt: string | null; createdAt: string; event: { kind: string; priority: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL'; title: string; body: string; createdAt: string; device: { code: string; name: string; system: { code: string } } | null }; deliveries: { status: string; deliveredAt: string | null; attemptCount: number }[] };
+export const getNotifications = async (unread?: boolean) => getJson<{ data: Notification[]; unread: number }>(`/api/v1/notifications?limit=100${unread === undefined ? '' : `&unread=${unread}`}`);
+export const markNotificationRead = (id: string) => postAction(`/api/v1/notifications/${encodeURIComponent(id)}/read`, {});
+export const markAllNotificationsRead = () => postAction('/api/v1/notifications/read-all', {});
+export type NotificationPreference = { inAppEnabled: boolean; minimumPriority: 'INFORMATION' | 'WARNING' | 'MAJOR' | 'CRITICAL' };
+export const getNotificationPreferences = () => getJson<{ data: NotificationPreference }>('/api/v1/notification-preferences');
+export const updateNotificationPreferences = async (input: Partial<NotificationPreference>) => { const response = await fetch('/api/v1/notification-preferences', { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken() ?? ''}` }, body: JSON.stringify(input) }); const result = await response.json(); if (!response.ok) throw new Error(result?.error?.message ?? `HTTP ${response.status}`); return result.data as NotificationPreference; };
 
 export type IncidentStatus = 'DETECTED' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'UNDER_INVESTIGATION' | 'UNDER_REPAIR' | 'VERIFICATION' | 'RESOLVED';
 export type Incident = {
@@ -160,6 +170,10 @@ export type Recommendation = {
   action: RecommendationAction; similarFailures: number; component: string; componentFailures: number;
   repairCount: number; repairCost: number; latestReplacementCost: number | null; projected30DayRepairCost: number | null;
   equipmentAgeDays: number | null; downtimeMs: number; latestFailureAt: string; rationale: string;
+  maintenance: { workOrders: number; verifiedCompletions: number; correctiveCompletions: number; expenditure: string;
+    repeatedParts: { part: string; workOrders: number }[]; failuresAfterCorrective: number; latestCorrectiveAt: string | null;
+    linkedIncidentIds: string[]; costNote: string; outcomes: { workOrderId: string; type: string; status: string; verified: boolean;
+      completedAt: string | null; findings: string | null; verificationResult: string | null }[] };
   decision: { id: string; decision: 'APPROVED' | 'DECLINED'; note: string; decidedAt: string; decidedBy: { name: string } } | null;
 };
 export type RecommendationReport = { data: Recommendation[]; policy: { windowDays: number; monitorAt: number; investigateAt: number; componentAt: number; replacementAt: number }; generatedAt: string; simulated: true; note: string };

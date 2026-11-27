@@ -1,0 +1,38 @@
+.maintenance-workspace { font-size: 12px; line-height: 1.55; }
+.maintenance-tabs { display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); margin-bottom:20px; }
+.maintenance-tabs a { padding:10px 13px; color:var(--muted); border-bottom:2px solid transparent; }
+.maintenance-tabs a.active { color:var(--text); border-bottom-color:var(--blue); }
+.maintenance-workspace h2 { font-size:15px; font-weight:600; margin:0 0 14px; }
+.maintenance-workspace h2:not(:first-child) { margin-top:24px; }
+.maintenance-workspace label { display:grid; gap:6px; color:var(--muted); font-size:11px; font-weight:600; }
+.maintenance-workspace input,.maintenance-workspace select,.maintenance-workspace textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:3px; color:var(--text); background:var(--surface); font:inherit; }
+.maintenance-workspace textarea { resize:vertical; min-height:75px; }
+.maintenance-workspace input:focus-visible,.maintenance-workspace textarea:focus-visible,.maintenance-workspace select:focus-visible,.maintenance-workspace button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.maintenance-workspace button { padding:8px 12px; margin-top:8px; border:1px solid var(--line); background:var(--surface-alt); color:var(--text); border-radius:3px; cursor:pointer; font:inherit; }
+.maintenance-workspace button:disabled { cursor:not-allowed; opacity:.5; }
+.maintenance-workspace .primary-button { padding:9px 14px; height:auto; color:#10232b; background:#a6c5ca; }
+.maintenance-workspace .toolbar { align-items:end; }
+.maintenance-workspace .toolbar label { min-width:130px; flex:1; }
+.maintenance-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-bottom:18px; align-items:start; }
+.maintenance-pad { padding:20px; margin-top:16px; overflow:auto; }
+.maintenance-form { padding:22px; max-width:1000px; display:grid; gap:18px; }
+.maintenance-form .maintenance-grid { margin:0; }
+.maintenance-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.maintenance-workspace dl { display:grid; grid-template-columns:minmax(140px,.6fr) minmax(0,1fr); gap:10px 16px; margin:0; }
+.maintenance-workspace dt { color:var(--muted); }.maintenance-workspace dd { margin:0; overflow-wrap:anywhere; }
+.maintenance-workspace table { min-width:600px; }.maintenance-workspace td { height:auto; padding:12px; }.maintenance-workspace th { padding:10px 12px; }
+.maintenance-workspace .maintenance-wrap { white-space:normal; min-width:180px; max-width:420px; overflow-wrap:anywhere; }
+.maintenance-workspace fieldset { border:0; margin:0; padding:0; display:grid; gap:12px; min-width:0; }
+.maintenance-workspace fieldset:disabled { opacity:.7; }.maintenance-workspace legend { color:var(--muted); padding:8px 0; }
+.maintenance-checklist { padding:14px 0; border-bottom:1px solid var(--line-soft); display:grid; gap:10px; }
+.maintenance-note { padding:12px; border-left:3px solid var(--blue); background:var(--surface-alt); }
+.maintenance-part { padding:16px 0; border-bottom:1px solid var(--line); }
+.maintenance-part-fields { display:grid; grid-template-columns:2fr 1.5fr .6fr 1fr; gap:12px; }
+.maintenance-pagination { justify-content:flex-end; margin-top:14px; }
+.maintenance-feedback { display:block; color:var(--green); margin:10px 0; min-height:16px; }
+.maintenance-workload { max-height:420px; }
+.maintenance-workload:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.maintenance-workload table { min-width:0; width:100%; table-layout:fixed; }
+.maintenance-workload th:first-child { width:60%; }
+.maintenance-workload td,.maintenance-workload th { white-space:normal; overflow-wrap:anywhere; }
+@media(max-width:900px) { .maintenance-grid { grid-template-columns:1fr; }.maintenance-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.maintenance-part-fields { grid-template-columns:1fr 1fr; }.maintenance-workspace dl { grid-template-columns:1fr; gap:4px; }.maintenance-workspace dd { margin-bottom:10px; } }

@@ -1,5 +1,6 @@
 import type { Database } from '../db.js';
 import type { AlarmLevel, IncidentPriority, IncidentStatus, UserRole } from '../generated/prisma/enums.js';
+import { recordNotification } from '../notifications/service.js';
 
 const steps: IncidentStatus[] = ['DETECTED', 'ACKNOWLEDGED', 'ASSIGNED', 'UNDER_INVESTIGATION', 'UNDER_REPAIR', 'VERIFICATION', 'RESOLVED'];
 const priorities: IncidentPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
@@ -25,12 +26,15 @@ export class IncidentService {
       });
       for (const alarm of alarms) {
         try {
-          await this.db.incident.create({ data: {
+          await this.db.$transaction(async tx => {
+          const created = await tx.incident.create({ data: {
             alarmId: alarm.id, deviceId: alarm.deviceId, description: alarm.message,
             priority: priorityFor(alarm.level),
             createdAt: alarm.createdAt,
             events: { create: { kind: 'DETECTED', detail: 'Incident opened from simulated fault alarm', createdAt: alarm.createdAt } },
           } });
+          await recordNotification(tx, { sourceKey: `incident:opened:${created.id}`, kind: 'INCIDENT_CHANGED', priority: alarm.level, title: 'Incident opened', body: alarm.message, deviceId: alarm.deviceId });
+          });
           this.onChange?.();
         } catch (error) {
           if ((error as { code?: string }).code !== 'P2002') throw error;
@@ -45,7 +49,8 @@ export class IncidentService {
           const current = await tx.incident.findUniqueOrThrow({ where: { id: incident.id }, select: { priority: true, status: true } });
           if (current.status === 'RESOLVED' || priorities.indexOf(priority) <= priorities.indexOf(current.priority)) return;
           await tx.incident.update({ where: { id: incident.id }, data: { priority } });
-          await tx.incidentEvent.create({ data: { incidentId: incident.id, kind: 'PRIORITY_CHANGED', detail: `Priority escalated from ${current.priority} to ${priority}` } });
+          const event = await tx.incidentEvent.create({ data: { incidentId: incident.id, kind: 'PRIORITY_CHANGED', detail: `Priority escalated from ${current.priority} to ${priority}` } });
+          await recordNotification(tx, { sourceKey: `incident:event:${event.id}`, kind: 'INCIDENT_CHANGED', priority: priority === 'URGENT' ? 'CRITICAL' : 'MAJOR', title: 'Incident priority changed', body: event.detail });
         }, { maxWait: 15000, timeout: 30000 });
         this.onChange?.();
       }
@@ -78,10 +83,11 @@ export class IncidentService {
         repairCompletedAt: next === 'VERIFICATION' ? at : undefined,
         resolvedAt: next === 'RESOLVED' ? at : undefined,
       } });
-      await tx.incidentEvent.create({ data: {
+      const event = await tx.incidentEvent.create({ data: {
         incidentId: id, actorId: actor.id, kind: 'STATUS_CHANGED',
         detail: next === 'ASSIGNED' ? `${incident.status} → ${next}; engineer assigned` : `${incident.status} → ${next}`,
       } });
+      await recordNotification(tx, { sourceKey: `incident:event:${event.id}`, kind: 'INCIDENT_CHANGED', priority: incident.priority === 'URGENT' ? 'CRITICAL' : incident.priority === 'HIGH' ? 'MAJOR' : 'WARNING', title: `Incident ${next.toLowerCase().replaceAll('_', ' ')}`, body: event.detail, deviceId: incident.deviceId, userIds: next === 'ASSIGNED' && assignedToId ? [assignedToId] : incident.assignedToId ? [incident.assignedToId] : [] });
       return updated;
     }, { maxWait: 15000, timeout: 30000 });
     this.onChange?.();

@@ -25,6 +25,12 @@ enum ActivationState {
   INELIGIBLE
 }
 
+enum EquipmentMaintenance {
+  AVAILABLE
+  IN_PROGRESS
+  AWAITING_APPROVAL
+}
+
 enum ServiceAvailability {
   AVAILABLE
   DEGRADED
@@ -112,6 +118,26 @@ enum IncidentPriority {
   URGENT
 }
 
+enum NotificationKind {
+  ALARM_RAISED
+  INCIDENT_CHANGED
+  MAINTENANCE_ASSIGNED
+}
+
+enum NotificationPriority {
+  INFORMATION
+  WARNING
+  MAJOR
+  CRITICAL
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  DISABLED
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique @db.VarChar(254)
@@ -138,8 +164,63 @@ model User {
   supervisedWorkOrders MaintenanceWorkOrder[] @relation("WorkOrderSupervisor")
   workOrderTransitions WorkOrderStatusHistory[]
   completedChecklistItems WorkOrderChecklistItem[]
+  notificationRecipients NotificationRecipient[]
+  notificationPreference NotificationPreference?
 
   @@index([role, active])
+}
+
+model NotificationEvent {
+  id String @id @default(uuid()) @db.Uuid
+  sourceKey String @unique @db.VarChar(180)
+  kind NotificationKind
+  priority NotificationPriority @default(INFORMATION)
+  title String @db.VarChar(200)
+  body String @db.VarChar(2000)
+  deviceId String? @db.Uuid
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  recipients NotificationRecipient[]
+  @@index([createdAt(sort: Desc)])
+  @@index([deviceId, createdAt(sort: Desc)])
+}
+
+model NotificationRecipient {
+  id String @id @default(uuid()) @db.Uuid
+  eventId String @db.Uuid
+  event NotificationEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  deliveries NotificationDelivery[]
+  @@unique([eventId, userId])
+  @@index([userId, readAt, createdAt(sort: Desc)])
+}
+
+model NotificationPreference {
+  userId String @id @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inAppEnabled Boolean @default(true)
+  minimumPriority NotificationPriority @default(INFORMATION)
+  updatedAt DateTime @updatedAt
+}
+
+model NotificationDelivery {
+  id String @id @default(uuid()) @db.Uuid
+  recipientId String @db.Uuid
+  recipient NotificationRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  channel String @default("IN_APP") @db.VarChar(24)
+  status NotificationDeliveryStatus @default(PENDING)
+  attemptCount Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastAttemptAt DateTime?
+  deliveredAt DateTime?
+  lastError String? @db.VarChar(500)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([recipientId, channel])
+  @@index([status, nextAttemptAt])
 }
 
 model LogicalSystem {
@@ -164,6 +245,8 @@ model Device {
   role            DeviceRole
   health          DeviceHealth    @default(HEALTHY)
   activationState ActivationState @default(STANDBY)
+  maintenanceStatus EquipmentMaintenance @default(AVAILABLE)
+  maintenanceEligible Boolean @default(true)
   commissionedAt  DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -178,6 +261,7 @@ model Device {
   recommendationDecisions RecommendationDecision[]
   maintenancePlans MaintenancePlan[]
   workOrders MaintenanceWorkOrder[]
+  notificationEvents NotificationEvent[]
 
   @@unique([systemId, role])
   @@index([systemId, activationState])

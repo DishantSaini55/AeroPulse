@@ -7,14 +7,17 @@ import { calculateRecommendations, recommendationPolicy } from './policy.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const decisionInput = z.strictObject({ deviceId: z.uuid(), causeKey: hash, evidenceHash: hash, decision: z.enum(['APPROVED', 'DECLINED']), note: z.string().trim().min(3).max(2000) });
 
-async function currentRecommendations(db: Database) {
+export async function currentRecommendations(db: Database) {
   const at = new Date();
   const policy = recommendationPolicy();
   const from = new Date(at.getTime() - policy.windowDays * 86_400_000);
   const devices = await db.device.findMany({ select: { id: true, code: true, name: true, commissionedAt: true, system: { select: { code: true } }, replacements: { orderBy: { replacedAt: 'desc' }, take: 1, select: { replacedAt: true, cost: true } } } });
-  const [faults, repairs] = await Promise.all([
+  const [faults, repairs, maintenance] = await Promise.all([
     db.faultDiagnosis.findMany({ where: { detectedAt: { gte: from, lte: at }, confirmedRootCause: { not: null } }, select: { id: true, deviceId: true, confirmedRootCause: true, component: true, ruleCode: true, detectedAt: true, resolvedAt: true } }),
     db.repairRecord.findMany({ where: { createdAt: { gte: from, lte: at } }, select: { id: true, cost: true, createdAt: true, incident: { select: { deviceId: true } } } }),
+    db.maintenanceWorkOrder.findMany({ where: { status: { not: 'CANCELLED' }, OR: [{ updatedAt: { gte: from, lte: at } },
+      { completedAt: { gte: from, lte: at } }, { actualStartAt: { lte: at }, completedAt: null }] },
+      include: { parts: true, checklistItems: true } }),
   ]);
   const rows = calculateRecommendations({
     devices: devices.map(item => ({ id: item.id, code: item.code, name: item.name, systemCode: item.system.code,
@@ -22,6 +25,11 @@ async function currentRecommendations(db: Database) {
       latestReplacementCost: item.replacements[0] ? Number(item.replacements[0].cost) : null })),
     faults: faults.map(item => ({ id: item.id, deviceId: item.deviceId, rootCause: item.confirmedRootCause, component: item.component, ruleCode: item.ruleCode, detectedAt: item.detectedAt, resolvedAt: item.resolvedAt })),
     repairs: repairs.map(item => ({ id: item.id, deviceId: item.incident.deviceId, at: item.createdAt, cost: Number(item.cost) })),
+    maintenance: maintenance.map(item => ({ id: item.id, deviceId: item.deviceId, incidentId: item.incidentId, type: item.type, status: item.status,
+      updatedAt: item.updatedAt, actualStartAt: item.actualStartAt, completedAt: item.completedAt,
+      verified: !!item.maintenanceModeAt && !!item.verificationResult && item.checklistItems.every(check => check.completed && !!check.result && check.result !== 'FAILED'),
+      findings: item.findings, verificationResult: item.verificationResult, laborCost: item.laborCost.toFixed(2), otherCost: item.otherCost.toFixed(2),
+      parts: item.parts.map(part => ({ partName: part.partName, quantity: part.quantity, unitCost: part.unitCost.toFixed(2) })) })),
   }, at, policy);
   return { rows, policy, at };
 }

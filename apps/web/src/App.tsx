@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity, Antenna, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight,
-  Clock3, CloudSun, Database, ExternalLink, HardDrive, LayoutDashboard,
+  Clock3, CloudSun, ExternalLink, LayoutDashboard,
   BarChart3, Bell, ClipboardList, FileText, FlaskConical, History, LogOut, Moon, Radio, RefreshCw, Search, Server, ShieldCheck, Stethoscope, Sun, Users, Wifi, WifiOff, Wrench,
 } from 'lucide-react';
 import { getHistory, getSnapshot, getWeather, type Device, type Telemetry, type Weather } from './api';
@@ -17,9 +17,17 @@ import { IncidentDetailPage, IncidentsPage, MaintenanceIndexPage, MaintenancePag
 import { AnalyticsPage } from './AnalyticsPage';
 import { RecommendationsPage } from './RecommendationsPage';
 import { EventHistoryPage, ReportsPage } from './ReportsPages';
+import { NotificationsPage } from './NotificationsPage';
 import { formatUtcDateTime, formatUtcTime } from './time';
 
 const TelemetryChart = lazy(() => import('./TelemetryChart'));
+const MaintenanceOverviewPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.MaintenanceOverviewPage })));
+const MaintenancePlansPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.MaintenancePlansPage })));
+const MaintenancePlanForm = lazy(() => import('./MaintenancePages').then(module => ({ default: module.MaintenancePlanForm })));
+const WorkOrdersPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.WorkOrdersPage })));
+const ManualWorkOrderPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.ManualWorkOrderPage })));
+const WorkOrderDetailPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.WorkOrderDetailPage })));
+const MaintenanceCalendarPage = lazy(() => import('./MaintenancePages').then(module => ({ default: module.MaintenanceCalendarPage })));
 
 const stamp = formatUtcDateTime;
 const shortTime = formatUtcTime;
@@ -166,6 +174,7 @@ function DeviceDetail({ devices, now, loading, error, streamConnected }: { devic
       </section>
       <div className="metric-grid">{available.map(field => <div className="small-metric" key={field.key}><span>{field.label}</span><strong>{number(history.data?.data[0]?.[field.key] as number | null | undefined, field.unit)}</strong></div>)}</div>
     </DataState>
+    <Suspense fallback={<div className="state-panel">Loading maintenance history…</div>}><WorkOrdersPage device={device.code} /></Suspense>
   </>;
 }
 
@@ -197,6 +206,7 @@ function OperationsApp({ user }: { user: User }) {
     { to: '/redundancy', label: 'Redundancy', icon: ShieldCheck, end: false },
     { to: '/diagnostics', label: 'Fault diagnostics', icon: Stethoscope, end: false },
     { to: '/alarms', label: 'Alarm center', icon: Bell, end: false },
+    { to: '/notifications', label: 'Notifications', icon: Bell, end: true },
     { to: '/incidents', label: 'Incidents', icon: ClipboardList, end: false },
     { to: '/maintenance', label: 'Maintenance', icon: Wrench, end: true },
     { to: '/analytics', label: 'Reliability', icon: BarChart3, end: true },
@@ -212,7 +222,7 @@ function OperationsApp({ user }: { user: User }) {
       <div className="sidebar-bottom"><div className="environment"><span className="env-dot" /><div><strong>SIMULATION</strong><span>Local environment</span></div></div><div className="sidebar-account" title={`${user.name} · ${user.email}`}><strong>{user.name}</strong><span>{user.role.replaceAll('_', ' ').toLowerCase()}</span></div><button className="collapse-button" onClick={logout} aria-label="Sign out"><LogOut size={16} /><span>Sign out</span></button><button className="collapse-button" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}<span>{collapsed ? '' : 'Collapse sidebar'}</span></button></div>
     </aside>
     <div className="main-area"><header className="topbar"><div className="topbar-title"><span className="topbar-path">AEROPULSE</span><span className="topbar-divider">/</span><span>Operations workspace</span></div><div className="topbar-actions"><span className={`connection ${snapshot.isError ? 'disconnected' : ''}`}>{snapshot.isError ? <WifiOff size={14} /> : <Wifi size={14} />}{snapshot.isError ? 'API DISCONNECTED' : realtime.connected ? 'LIVE STREAM' : 'POLLING FALLBACK'}</span><span className="topbar-time"><Clock3 size={14} /> {formatUtcTime(now, false)}</span><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button></div></header>
-      <AlarmBanner notices={realtime.alarmNotices} connected={realtime.connected} /><main className="content"><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/redundancy" element={<RedundancyPage now={now} streamConnected={realtime.connected} />} /><Route path="/diagnostics" element={<DiagnosticsPage />} /><Route path="/alarms" element={<AlarmPage />} /><Route path="/incidents" element={<IncidentsPage />} /><Route path="/incidents/:id" element={<IncidentDetailPage />} /><Route path="/maintenance" element={<MaintenanceIndexPage />} /><Route path="/maintenance/:code" element={<MaintenancePage />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/recommendations" element={<RecommendationsPage />} />{['SUPERVISOR', 'ADMINISTRATOR'].includes(user.role) && <Route path="/reports" element={<ReportsPage />} />}{['SUPERVISOR', 'ADMINISTRATOR'].includes(user.role) && <Route path="/event-history" element={<EventHistoryPage />} />}<Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} />{user.role === 'ADMINISTRATOR' && <Route path="/users" element={<UsersPage />} />}{user.role === 'ADMINISTRATOR' && <Route path="/simulation" element={<SimulationLab />} />}<Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
+      <AlarmBanner notices={realtime.alarmNotices} connected={realtime.connected} /><main className="content"><Suspense fallback={<div className="state-panel">Loading workspace…</div>}><Routes><Route path="/" element={<Overview devices={devices} loading={snapshot.isPending} error={snapshot.error} weather={weather.data} weatherLoading={weather.isPending} weatherError={weather.error} now={now} events={realtime.events} streamConnected={realtime.connected} />} /><Route path="/infrastructure" element={<Infrastructure devices={devices} loading={snapshot.isPending} error={snapshot.error} now={now} />} /><Route path="/redundancy" element={<RedundancyPage now={now} streamConnected={realtime.connected} />} /><Route path="/diagnostics" element={<DiagnosticsPage />} /><Route path="/alarms" element={<AlarmPage />} /><Route path="/notifications" element={<NotificationsPage />} /><Route path="/incidents" element={<IncidentsPage />} /><Route path="/incidents/:id" element={<IncidentDetailPage />} /><Route path="/maintenance" element={<MaintenanceOverviewPage />} /><Route path="/maintenance/plans" element={<MaintenancePlansPage />} /><Route path="/maintenance/plans/new" element={<MaintenancePlanForm />} /><Route path="/maintenance/plans/:id/edit" element={<MaintenancePlanForm />} /><Route path="/maintenance/orders" element={<WorkOrdersPage />} /><Route path="/maintenance/orders/new" element={<ManualWorkOrderPage />} /><Route path="/maintenance/orders/:id" element={<WorkOrderDetailPage />} /><Route path="/maintenance/calendar" element={<MaintenanceCalendarPage />} /><Route path="/maintenance/records" element={<MaintenanceIndexPage />} /><Route path="/maintenance/:code" element={<MaintenancePage />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/recommendations" element={<RecommendationsPage />} />{['SUPERVISOR', 'ADMINISTRATOR'].includes(user.role) && <Route path="/reports" element={<ReportsPage />} />}{['SUPERVISOR', 'ADMINISTRATOR'].includes(user.role) && <Route path="/event-history" element={<EventHistoryPage />} />}<Route path="/devices/:code" element={<DeviceDetail devices={devices} now={now} loading={snapshot.isPending} error={snapshot.error} streamConnected={realtime.connected} />} /><Route path="/weather" element={<WeatherPage weather={weather.data} loading={weather.isPending} error={weather.error} />} />{user.role === 'ADMINISTRATOR' && <Route path="/users" element={<UsersPage />} />}{user.role === 'ADMINISTRATOR' && <Route path="/simulation" element={<SimulationLab />} />}<Route path="*" element={<Navigate to="/" replace />} /></Routes></Suspense></main>
       <footer className="footer"><span><span className="footer-led" /> AEROPULSE / INDEPENDENT SIMULATION</span><span>Equipment data: simulated · Weather: external observation</span></footer>
     </div>
   </div>;

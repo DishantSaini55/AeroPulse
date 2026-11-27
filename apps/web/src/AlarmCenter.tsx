@@ -7,14 +7,16 @@ import { formatUtcDateTime } from './time';
 import type { AlarmNotice } from './useRealtime';
 import { AlarmAudioManager, type AlarmLevel, type AudioPreferences, loadAudioPreferences, saveAudioPreferences } from './alarmAudio';
 import './alarms.css';
+import { useAuth } from './auth';
+import { getMaintenanceAnnouncements, maintenanceAudioNotice } from './maintenanceAnnouncements';
 
 function AudioPreferencesPanel({ preferences, update, manager }: { preferences: AudioPreferences; update: (next: Partial<AudioPreferences>) => void; manager: AlarmAudioManager }) {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const refresh = () => setVoices(manager.voices());
     refresh();
-    speechSynthesis?.addEventListener?.('voiceschanged', refresh);
-    return () => speechSynthesis?.removeEventListener?.('voiceschanged', refresh);
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.addEventListener?.('voiceschanged', refresh);
+    return () => { if (typeof speechSynthesis !== 'undefined') speechSynthesis.removeEventListener?.('voiceschanged', refresh); };
   }, [manager]);
   const test = async (level: AlarmLevel) => { await manager.activate(); manager.playPattern(level); };
   return <div className="alarm-preferences" role="dialog" aria-label="Alarm audio preferences">
@@ -31,13 +33,15 @@ function AudioPreferencesPanel({ preferences, update, manager }: { preferences: 
 }
 
 export function AlarmBanner({ notices, connected }: { notices: AlarmNotice[]; connected: boolean }) {
+  const { user } = useAuth();
   const query = useQuery({ queryKey: ['alarms', 'true'], queryFn: () => getAlarms('true'), refetchInterval: 10000 });
+  const maintenance = useQuery({ queryKey: ['maintenance','announcements',user?.id], queryFn: getMaintenanceAnnouncements, refetchInterval: 15000 });
   const active = query.data ?? [];
   const highest = active.some(item => item.level === 'CRITICAL') ? 'CRITICAL' : active.some(item => item.level === 'MAJOR') ? 'MAJOR' : active.some(item => item.level === 'WARNING') ? 'WARNING' : 'INFORMATION';
   const [preferences, setPreferences] = useState(loadAudioPreferences);
   const [showPreferences, setShowPreferences] = useState(false);
   const preferenceRef = useRef(preferences); preferenceRef.current = preferences;
-  const manager = useMemo(() => new AlarmAudioManager(() => preferenceRef.current), []);
+  const manager = useMemo(() => new AlarmAudioManager(() => preferenceRef.current, user?.id ?? 'local'), [user?.id]);
   const update = (next: Partial<AudioPreferences>) => setPreferences(current => ({ ...current, ...next, severities: { ...current.severities, ...next.severities } }));
   useEffect(() => { saveAudioPreferences(preferences); manager.setPreferencesChanged(); if (preferences.muted) manager.stopAll(); }, [preferences, manager]);
   useEffect(() => () => manager.destroy(), [manager]);
@@ -48,6 +52,8 @@ export function AlarmBanner({ notices, connected }: { notices: AlarmNotice[]; co
       if (alarm) manager.enqueue({ ...alarm, failover: alarm.device.system.failover });
     }
   }, [notices, query.data, manager]);
+  useEffect(() => { for (const notice of maintenance.data?.data ?? []) manager.enqueue(maintenanceAudioNotice(notice)); }, [maintenance.data, manager]);
+  useEffect(() => { if (query.data) manager.reconcileActiveAlarms(query.data); }, [query.data, manager]);
   const critical = active.filter(item => item.level === 'CRITICAL').length;
   const unacknowledgedMajor = active.filter(item => item.level === 'MAJOR' && !item.acknowledged).length;
   return <div className={`alarm-banner ${active.length ? `alarm-${highest.toLowerCase()}` : ''}`}><NavLink to="/alarms" className="alarm-banner-status">{active.length ? <Bell size={16} /> : <BellOff size={16} />}<strong>{active.length ? `${active.length} ACTIVE · ${critical} CRITICAL · ${unacknowledgedMajor} UNACK MAJOR` : 'NO ACTIVE ALARMS'}</strong>{active.length > 0 && <span>{active[0]?.message}</span>}</NavLink><div className="alarm-controls"><span title={connected ? 'Socket.IO connected' : 'Socket.IO reconnecting'}>{connected ? <Wifi size={15} /> : <WifiOff size={15} />}</span><button aria-label={preferences.muted ? 'Unmute alarms' : 'Mute alarms'} onClick={() => update({ muted: !preferences.muted })}>{preferences.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button aria-label="Alarm audio preferences" onClick={() => setShowPreferences(value => !value)}><Settings2 size={16} /></button>{showPreferences && <AudioPreferencesPanel preferences={preferences} update={update} manager={manager} />}</div></div>;

@@ -5,7 +5,13 @@ export async function recordedAnalyticsInput(db: Database, from: Date, to: Date,
   // Keep each batch below the pool size so monitoring transactions retain connections.
   const [devices, heartbeatCounts] = await Promise.all([
     db.device.findMany({ select: { id: true, code: true, system: { select: { code: true } } } }),
-    db.heartbeat.groupBy({ by: ['deviceId'], where: { recordedAt: { gte: from, lte: to } }, _count: { _all: true } }),
+    db.$queryRaw<Array<{ deviceId: string; _count: { _all: number } }>>`
+      SELECT h."deviceId", json_build_object('_all', COUNT(*)) AS "_count"
+      FROM "Heartbeat" h WHERE h."recordedAt" >= ${from} AND h."recordedAt" <= ${to}
+      AND NOT EXISTS (SELECT 1 FROM "MaintenanceWorkOrder" w
+        WHERE w."deviceId" = h."deviceId" AND w."maintenanceModeAt" IS NOT NULL
+        AND w."actualStartAt" <= h."recordedAt" AND (w."completedAt" IS NULL OR w."completedAt" > h."recordedAt"))
+      GROUP BY h."deviceId"`,
   ]);
   const [diagnoses, outageAlarms, incidents] = await Promise.all([
     db.faultDiagnosis.findMany({ where: { detectedAt: { lte: to }, OR: [{ resolvedAt: null }, { resolvedAt: { gte: from } }] }, select: { deviceId: true, ruleCode: true, component: true, confirmedRootCause: true, firstObservedAt: true, detectedAt: true, resolvedAt: true } }),
@@ -18,9 +24,11 @@ export async function recordedAnalyticsInput(db: Database, from: Date, to: Date,
     db.deviceReplacement.findMany({ where: { replacedAt: { gte: from, lte: to } }, select: { deviceId: true, cost: true, replacedAt: true } }),
   ]);
   const counts = new Map(heartbeatCounts.map(item => [item.deviceId, item._count._all]));
+  const planned = await db.maintenanceWorkOrder.findMany({ where: { type: { in: ['PREVENTIVE', 'INSPECTION'] }, maintenanceModeAt: { not: null }, actualStartAt: { lte: to }, OR: [{ completedAt: null }, { completedAt: { gte: from } }] }, select: { deviceId: true, actualStartAt: true, completedAt: true } });
   return {
     devices: devices.map(item => ({ id: item.id, code: item.code, systemCode: item.system.code, healthyObservedMs: (counts.get(item.id) ?? 0) * heartbeatIntervalMs })),
     diagnoses,
+    plannedMaintenance: planned.map(item => ({ deviceId: item.deviceId, start: item.actualStartAt!, end: item.completedAt })),
     outages: outageAlarms.map(item => ({ systemCode: item.device.system.code, createdAt: item.createdAt, resolvedAt: item.resolvedAt })),
     incidents,
     failovers: failovers.map(item => ({ systemCode: item.system.code, result: item.result, durationMs: item.durationMs, detectedAt: item.detectedAt })),

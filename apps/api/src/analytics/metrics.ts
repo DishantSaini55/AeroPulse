@@ -7,6 +7,7 @@ export type AnalyticsExpense = { deviceId: string; at: Date; amount: number; kin
 export type AnalyticsInput = {
   devices: AnalyticsDevice[]; diagnoses: AnalyticsDiagnosis[]; outages: AnalyticsOutage[];
   incidents: AnalyticsIncident[]; failovers: AnalyticsFailover[]; expenses: AnalyticsExpense[];
+  plannedMaintenance?: Array<{ deviceId: string; start: Date; end: Date | null }>;
 };
 
 type Interval = { start: number; end: number };
@@ -104,6 +105,8 @@ export function calculateReliability(input: AnalyticsInput, from: Date, to: Date
   const monthly = counts(episodeStarts.map(at => utcMonth(new Date(at)))).map(item => ({ month: item.label, failures: item.count })).sort((a, b) => a.month.localeCompare(b.month));
   const observedEquipmentMs = [...observedMsByDevice.values()].reduce((sum, value) => sum + value, 0);
   const equipmentDowntimeMs = [...downtimeByDevice.values()].reduce((sum, value) => sum + value, 0);
+  const plannedEquipmentUnavailabilityMs = input.devices.reduce((total, device) => total + overlapMs(
+    (input.plannedMaintenance ?? []).filter(item => item.deviceId === device.id).map(item => ({ start: item.start.getTime(), end: (item.end ?? to).getTime() })), start, end), 0);
   const observedServiceMs = systemRows.reduce((sum, row) => sum + row.observedMs, 0);
   const serviceDowntimeMs = systemRows.reduce((sum, row) => sum + row.downtimeMs, 0);
   const findingsInWindow = input.diagnoses.filter(item => item.detectedAt >= from && item.detectedAt <= to);
@@ -112,7 +115,7 @@ export function calculateReliability(input: AnalyticsInput, from: Date, to: Date
     coverage: { diagnoses: findingsInWindow.length, mttdSamples: mttdSamples.length, mttaSamples: mttaSamples.length, mttrSamples: mttrSamples.length, mtbfIntervals: mtbfSamples.length, observedEquipmentMs, observedServiceMs },
     summary: { failureEpisodes: episodeStarts.length, mttdMs: mean(mttdSamples), mttaMs: mean(mttaSamples), mttrMs: mean(mttrSamples), mtbfMs: mean(mtbfSamples),
       equipmentAvailabilityPct: percent(observedEquipmentMs - equipmentDowntimeMs, observedEquipmentMs), serviceAvailabilityPct: percent(observedServiceMs - serviceDowntimeMs, observedServiceMs),
-      equipmentDowntimeMs, serviceDowntimeMs, recurringFaults: [...recurrentByDevice.values()].reduce((sum, value) => sum + value, 0),
+      equipmentDowntimeMs, plannedEquipmentUnavailabilityMs, serviceDowntimeMs, recurringFaults: [...recurrentByDevice.values()].reduce((sum, value) => sum + value, 0),
       automaticFailovers: automatic.length, failoverSuccessPct: percent(successful.length, automatic.length), meanFailoverDurationMs: mean(successful.map(item => item.durationMs)),
       maintenanceCost: input.expenses.filter(item => item.at >= from && item.at <= to).reduce((sum, item) => sum + item.amount, 0) },
     dailyTrends: [...daily.values()], monthlyTrends: monthly,

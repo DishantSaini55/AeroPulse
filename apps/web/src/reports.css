@@ -12,4 +12,19 @@
 .report-path { max-width: 300px; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
 .audit-success { color: var(--green); } .audit-failure { color: var(--red); }
 .report-pagination { display: flex; justify-content: end; gap: 9px; margin-top: 14px; }
+.report-document-filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; padding:20px; }
+.report-document-filters label { display:grid; gap:7px; min-width:0; color:var(--muted); font-size:12px; }
+.report-document-filters label:first-child { grid-column:span 3; }
+.report-document-filters input,.report-document-filters select { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--line); border-radius:4px; background:var(--surface); color:var(--text); padding:10px; font:inherit; }
+.report-document-actions,.report-document-filters>.report-note,.report-document-filters>.form-error { grid-column:1/-1; }
+.report-document-preview { margin-top:20px; padding:20px; }
+.report-document-preview .panel-head { flex-wrap:wrap; gap:12px; }
+.report-document-preview h2 { font-size:15px; overflow-wrap:anywhere; }
+.report-document-preview .panel-head>span { font-size:12px; color:var(--muted); }
+.report-pdf-frame { width:100%; height:780px; margin-top:16px; border:1px solid var(--line); border-radius:4px; background:#fff; }
+.legacy-report-panel { margin-top:28px; padding:20px; }
+.legacy-report-panel>summary { cursor:pointer; color:var(--muted); }
+.legacy-report-panel[open]>.page-heading { margin-top:24px; }
+@media(max-width:900px){.report-document-filters{grid-template-columns:repeat(2,minmax(0,1fr));}.report-document-filters label:first-child{grid-column:span 2;}}
+@media(max-width:600px){.report-document-filters{grid-template-columns:1fr;}.report-document-filters label:first-child{grid-column:span 1;}.report-pdf-frame{height:560px;}.report-document-preview{padding:12px;}}
 @media (max-width: 700px) { .report-filters, .audit-filters { display: grid; grid-template-columns: 1fr; } .report-filters label, .audit-filters label { min-width: 0; } }

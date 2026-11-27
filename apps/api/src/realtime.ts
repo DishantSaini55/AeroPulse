@@ -17,6 +17,8 @@ interface ServerToClientEvents {
   'status:changed': (event: StatusChange) => void;
   'alarm:raised': (event: AlarmNotice) => void;
   'incident:changed': (event: { simulated: true }) => void;
+  'maintenance:changed': (event: { simulated: true }) => void;
+  'notifications:changed': (event: { simulated: true }) => void;
 }
 
 export function attachRealtime(server: HttpServer, auth?: AuthProvider) {

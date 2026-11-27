@@ -58,7 +58,7 @@ export class AlarmService {
         if (existing) continue;
         const alarm = await this.db.alarm.create({ data: {
           sourceKey, deviceId: device.id, level: 'CRITICAL', initialLevel: 'CRITICAL',
-          message: `Critical alert. Both ${system.name} devices are unavailable. Immediate maintenance attention required.`, createdAt: at, simulated: true,
+          message: `Critical alert. ${system.name} service is unavailable; no safe active device is providing service. Immediate maintenance attention required.`, createdAt: at, simulated: true,
         } });
         this.onNotice?.({ id: alarm.id, level: 'CRITICAL', message: alarm.message, deviceCode: device.code, createdAt: at.toISOString(), simulated: true });
       }

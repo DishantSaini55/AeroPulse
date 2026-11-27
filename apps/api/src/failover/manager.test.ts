@@ -24,6 +24,8 @@ function fixture(standbyFresh = true) {
       Object.assign(devices.find(item => item.id === where.id)!, data);
     } },
     failoverEvent: { create: async ({ data }: { data: { action: string; result: string; toDeviceId?: string | null } }) => { events.push(data); return data; } },
+    user: { findMany: async () => [] },
+    notificationEvent: { create: async () => ({ id: 'notification-fixture' }) },
     $queryRaw: async () => [],
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
   } as unknown as Database;

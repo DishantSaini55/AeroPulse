@@ -5,11 +5,11 @@ export class DiagnosisService {
   private running = false;
   constructor(private readonly db: Database, private readonly heartbeatTimeoutMs: number, private readonly heartbeatIntervalMs = 5000) {}
 
-  async scan(at = new Date()) {
+  async scan(at = new Date(), deviceId?: string) {
     if (this.running) return;
     this.running = true;
     try {
-      const devices = await this.db.device.findMany({ include: {
+      const devices = await this.db.device.findMany({ where: deviceId ? { id: deviceId } : undefined, include: {
         telemetry: { take: 1, orderBy: { recordedAt: 'desc' } },
         heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } },
         system: { select: { availability: true } },
@@ -17,6 +17,7 @@ export class DiagnosisService {
       const thresholds = diagnosticThresholds();
       const affectedBySystem = new Map<string, number>();
       for (const device of devices) {
+        if (device.maintenanceStatus && device.maintenanceStatus !== 'AVAILABLE') continue;
         const sample = device.telemetry[0];
         const last = device.heartbeats[0]?.recordedAt ?? device.createdAt;
         if (at.getTime() - last.getTime() >= this.heartbeatTimeoutMs || (sample?.packetLossPct != null && sample.packetLossPct >= thresholds.packetLossPct)) {
@@ -24,6 +25,7 @@ export class DiagnosisService {
         }
       }
       for (const device of devices) {
+        if (device.maintenanceStatus && device.maintenanceStatus !== 'AVAILABLE') continue;
         const sample = device.telemetry[0];
         if (!sample) continue;
         const lastHeartbeat = device.heartbeats[0]?.recordedAt ?? device.createdAt;

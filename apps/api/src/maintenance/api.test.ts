@@ -197,7 +197,8 @@ test('maintenance inputs cannot alter device health, activation or restore eligi
     const response = await request('work-orders/' + order.id + '/findings', 'PATCH', { findings: 'Attempted privilege escalation', [field]: field === 'health' ? 'HEALTHY' : 'ACTIVE' });
     assert.equal(response.status, 400);
   }
-  for (const action of ['start', 'complete']) assert.equal((await request('work-orders/' + order.id + '/' + action, 'POST', {})).status, 404);
+  assert.equal((await request('work-orders/' + order.id + '/start', 'POST', {}, 'other')).status, 403);
+  assert.equal((await request('work-orders/' + order.id + '/complete', 'POST', {})).status, 404);
   assert.deepEqual(await db!.device.findUniqueOrThrow({ where: { id: order.deviceId } }), before);
 });
 

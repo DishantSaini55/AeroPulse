@@ -1,11 +1,24 @@
 import type { Database } from '../db.js';
+import type { PublicUser } from '../auth.js';
+import { maintenanceAction } from '../maintenance/safety.js';
 import { heartbeatHealth, serviceAvailability, type HeartbeatPolicy, type StatusChange } from '../heartbeat/monitor.js';
+import { recordNotification } from '../notifications/service.js';
 
 export class FailbackError extends Error {
   constructor(readonly code: 'NOT_FOUND' | 'PRIMARY_NOT_READY' | 'NO_STANDBY_ACTIVE', message: string) { super(message); }
 }
 
 export class RedundancyManager {
+  async startMaintenance(id: string, actor: Pick<PublicUser, 'id' | 'role'>, at = new Date()) {
+    const result = await maintenanceAction(this.db, id, actor, this.policy, 'start', at);
+    this.onChange?.(result);
+    return result.order;
+  }
+  async approveMaintenance(id: string, actor: Pick<PublicUser, 'id' | 'role'>, at = new Date()) {
+    const result = await maintenanceAction(this.db, id, actor, this.policy, 'approve', at);
+    this.onChange?.(result);
+    return result.order;
+  }
   private timer?: ReturnType<typeof setInterval>;
   private startupTimer?: ReturnType<typeof setTimeout>;
   private pending?: Promise<StatusChange | null>;
@@ -21,22 +34,22 @@ export class RedundancyManager {
     for (const preview of systems) {
       const id = preview.id;
       const previewDevices = preview.devices.map(device => {
-        const health = heartbeatHealth(device.health, device.heartbeats[0]?.recordedAt ?? null, device.createdAt, at, this.policy);
+        const health = device.maintenanceStatus && device.maintenanceStatus !== 'AVAILABLE' ? device.health : heartbeatHealth(device.health, device.heartbeats[0]?.recordedAt ?? null, device.createdAt, at, this.policy);
         return { health, activationState: device.activationState, changed: health !== device.health };
       });
       if (!previewDevices.some(device => device.changed) && serviceAvailability(previewDevices) === preview.availability) continue;
       const changed = await this.db.$transaction(async transaction => {
         // Assignment writers lock the same row; the partial unique index remains the final guard.
-        await transaction.$queryRaw`SELECT "id" FROM "LogicalSystem" WHERE "id" = ${id}::uuid FOR UPDATE`;
+        await transaction.$queryRaw`SELECT "id" FROM "LogicalSystem" WHERE "id" = ${id}::uuid FOR NO KEY UPDATE`;
         const system = await transaction.logicalSystem.findUniqueOrThrow({
           where: { id }, include: { devices: { include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } } },
         });
         const assessed = system.devices.map(device => ({
-          device, health: heartbeatHealth(device.health, device.heartbeats[0]?.recordedAt ?? null, device.createdAt, at, this.policy),
+          device, health: device.maintenanceStatus && device.maintenanceStatus !== 'AVAILABLE' ? device.health : heartbeatHealth(device.health, device.heartbeats[0]?.recordedAt ?? null, device.createdAt, at, this.policy),
         }));
         const active = assessed.find(item => item.device.activationState === 'ACTIVE');
         const activeJustFailed = active?.health === 'UNAVAILABLE' && active.device.health !== 'UNAVAILABLE';
-        const standby = assessed.find(item => item.device.activationState === 'STANDBY' && item.health === 'HEALTHY');
+        const standby = assessed.find(item => item.device.activationState === 'STANDBY' && item.device.maintenanceEligible !== false && (!item.device.maintenanceStatus || item.device.maintenanceStatus === 'AVAILABLE') && item.health === 'HEALTHY');
         const changedCodes: string[] = [];
         for (const { device, health } of assessed) {
           if (health === device.health) continue;
@@ -52,12 +65,13 @@ export class RedundancyManager {
             changedCodes.push(active.device.code, standby.device.code);
             failedOver = true;
           }
-          await transaction.failoverEvent.create({ data: {
+          const event = await transaction.failoverEvent.create({ data: {
             systemId: id, fromDeviceId: active.device.id, toDeviceId: standby?.device.id,
             action: 'AUTOMATIC_FAILOVER', result: standby ? 'SUCCESS' : 'NO_HEALTHY_STANDBY',
             reason: standby ? 'Active device missed heartbeat threshold; healthy standby activated' : 'Active device missed heartbeat threshold; no healthy standby available',
             detectedAt: at, completedAt: new Date(), durationMs: Math.max(0, Date.now() - started), simulated: true,
           } });
+          await recordNotification(transaction, { sourceKey: `failover:${event.id}`, kind: 'INCIDENT_CHANGED', priority: standby ? 'MAJOR' : 'CRITICAL', title: standby ? 'Automatic failover completed' : 'Failover could not restore service', body: event.reason, deviceId: active.device.id });
         }
         const availability = serviceAvailability(assessed.map(({ device, health }) => ({
           health, activationState: failedOver && device.id === active?.device.id ? 'INELIGIBLE' : failedOver && device.id === standby?.device.id ? 'ACTIVE' : device.activationState,
@@ -78,26 +92,27 @@ export class RedundancyManager {
     const result = await this.db.$transaction(async transaction => {
       const systemId = await transaction.logicalSystem.findUnique({ where: { code: systemCode }, select: { id: true } });
       if (!systemId) throw new FailbackError('NOT_FOUND', 'System not found');
-      await transaction.$queryRaw`SELECT "id" FROM "LogicalSystem" WHERE "id" = ${systemId.id}::uuid FOR UPDATE`;
+      await transaction.$queryRaw`SELECT "id" FROM "LogicalSystem" WHERE "id" = ${systemId.id}::uuid FOR NO KEY UPDATE`;
       const system = await transaction.logicalSystem.findUniqueOrThrow({
         where: { id: systemId.id }, include: { devices: { include: { heartbeats: { take: 1, orderBy: { recordedAt: 'desc' } } } } },
       });
       const primary = system.devices.find(device => device.role === 'PRIMARY');
       const secondary = system.devices.find(device => device.role === 'SECONDARY' && device.activationState === 'ACTIVE');
-      if (!secondary) throw new FailbackError('NO_STANDBY_ACTIVE', 'Secondary device is not active');
-      if (!primary || heartbeatHealth(primary.health, primary.heartbeats[0]?.recordedAt ?? null, primary.createdAt, at, this.policy) !== 'HEALTHY') {
+      if (!secondary && system.devices.some(device => device.activationState === 'ACTIVE')) throw new FailbackError('NO_STANDBY_ACTIVE', 'Secondary device is not active');
+      if (!primary || primary.maintenanceEligible === false || (primary.maintenanceStatus && primary.maintenanceStatus !== 'AVAILABLE') || heartbeatHealth(primary.health, primary.heartbeats[0]?.recordedAt ?? null, primary.createdAt, at, this.policy) !== 'HEALTHY') {
         throw new FailbackError('PRIMARY_NOT_READY', 'Primary device is not healthy with a recent heartbeat');
       }
       const started = Date.now();
-      await transaction.device.update({ where: { id: secondary.id }, data: { activationState: 'STANDBY' } });
+      if (secondary) await transaction.device.update({ where: { id: secondary.id }, data: { activationState: 'STANDBY' } });
       await transaction.device.update({ where: { id: primary.id }, data: { activationState: 'ACTIVE' } });
       await transaction.logicalSystem.update({ where: { id: system.id }, data: { availability: 'AVAILABLE' } });
       const event = await transaction.failoverEvent.create({ data: {
-        systemId: system.id, fromDeviceId: secondary.id, toDeviceId: primary.id, initiatedById: userId,
-        action: 'MANUAL_FAILBACK', result: 'SUCCESS', reason: 'Authorized manual failback to recovered primary',
+        systemId: system.id, fromDeviceId: secondary?.id, toDeviceId: primary.id, initiatedById: userId,
+        action: 'MANUAL_FAILBACK', result: 'SUCCESS', reason: secondary ? 'Authorized manual failback to recovered primary' : 'Authorized recovery activation of eligible primary after complete outage',
         detectedAt: at, completedAt: new Date(), durationMs: Math.max(0, Date.now() - started), simulated: true,
       } });
-      return { event, codes: [primary.code, secondary.code], systemCode: system.code };
+      await recordNotification(transaction, { sourceKey: `failover:${event.id}`, kind: 'INCIDENT_CHANGED', priority: 'INFORMATION', title: 'Manual failback completed', body: event.reason, deviceId: primary.id });
+      return { event, codes: [primary.code, ...(secondary ? [secondary.code] : [])], systemCode: system.code };
     }, { maxWait: 15000, timeout: 30000 });
     this.onChange?.({ deviceCodes: result.codes, systemCodes: [result.systemCode], checkedAt: at.toISOString(), simulated: true });
     return result.event;

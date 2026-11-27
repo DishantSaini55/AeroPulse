@@ -10,6 +10,8 @@
     "test": "npm run build && node --test dist/**/*.test.js",
     "test:ci": "npm run build && node --test --test-concurrency=1 dist/**/*.test.js",
     "test:local": "node scripts/run-local-tests.mjs",
+    "verify:notifications:browser": "node scripts/verify-notification-browser.mjs",
+    "verify:notifications:redis": "node scripts/verify-notification-redis.mjs",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "auth:bootstrap": "tsx prisma/bootstrap-admin.ts"
@@ -23,6 +25,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.0",
     "jose": "^6.0.0",
+    "pdfkit": "0.21.0",
     "redis": "^6.4.0",
     "socket.io": "^4.8.0",
     "zod": "^4.0.0"
@@ -31,12 +34,17 @@
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/pdfkit": "0.17.7",
+    "pdfjs-dist": "6.5.438",
     "prisma": "^7.0.0",
     "socket.io-client": "^4.8.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "effect": "3.22.5"
   }
 }
